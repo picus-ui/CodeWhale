@@ -364,12 +364,17 @@
     async function decideApproval(approvalId, decision, container) {
       for (const button of container.querySelectorAll("button")) button.disabled = true;
       const remember = $("remember-approval").checked;
-      const result = await api("/v1/approvals/" + encodeURIComponent(approvalId), {
-        method: "POST",
-        body: JSON.stringify({ decision, remember })
-      });
-      const decided = result?.decision ?? decision;
-      container.innerHTML = "<span class='meta'>Decision sent: " + escapeHtml(decided) + "</span>";
+      try {
+        const result = await api("/v1/approvals/" + encodeURIComponent(approvalId), {
+          method: "POST",
+          body: JSON.stringify({ decision, remember })
+        });
+        const decided = result?.decision ?? decision;
+        container.innerHTML = "<span class='meta'>Decision sent: " + escapeHtml(decided) + "</span>";
+      } catch (err) {
+        for (const button of container.querySelectorAll("button")) button.disabled = false;
+        throw err;
+      }
     }
 
     function appendEvent(name, data) {
@@ -412,7 +417,7 @@
       const threads = await api("/v1/threads/summary?limit=60&include_archived=false");
       const list = $("threads");
       list.innerHTML = "";
-      if (!threads.length) {
+      if (!threads || !threads.length) {
         list.innerHTML = "<div class='empty'>No active threads.</div>";
         return;
       }
