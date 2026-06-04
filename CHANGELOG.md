@@ -71,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pending-input preview rows now label delivery mode explicitly as steer
   pending, rejected steer, or queued follow-up, with wrapped continuation rows
   aligned under the label so busy-turn input state is easier to read (#2054).
+- Editing a queued follow-up is now an explicit pending-input state. Pressing
+  `Esc` while editing a queued follow-up restores the original queued message
+  instead of cancelling the active turn or silently dropping the queued work
+  (#2054).
 - Sidebar hover details now use row-level metadata for truncated Work, Tasks,
   and Agents rows. Mouse hover opens a bordered, wrapping popover with the full
   underlying row text, long turn/agent ids, and current sub-agent progress

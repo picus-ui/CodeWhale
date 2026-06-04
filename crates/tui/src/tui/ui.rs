@@ -3471,8 +3471,10 @@ async fn run_event_loop(
                         }
                         EscapeAction::DiscardQueuedDraft => {
                             app.backtrack.reset();
-                            app.queued_draft = None;
-                            app.status_message = Some("Stopped editing queued message".to_string());
+                            if app.cancel_queued_draft_edit() {
+                                app.status_message =
+                                    Some("Queued edit canceled; follow-up restored".to_string());
+                            }
                         }
                         EscapeAction::ClearInput => {
                             app.backtrack.reset();
@@ -6540,6 +6542,13 @@ fn build_pending_input_preview(app: &App) -> PendingInputPreview {
         .iter()
         .map(|m| m.display.clone())
         .collect();
+    preview.editing_queued_message = app.queued_draft.as_ref().map(|draft| {
+        if app.input.trim().is_empty() {
+            draft.display.clone()
+        } else {
+            app.input.clone()
+        }
+    });
     preview
 }
 

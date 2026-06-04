@@ -3996,6 +3996,22 @@ fn test_esc_discards_queued_draft_before_clearing_input() {
 }
 
 #[test]
+fn test_esc_prioritizes_queued_draft_edit_over_loading_cancel() {
+    let mut app = create_test_app();
+    app.is_loading = true;
+    app.input = "editing queued follow-up".to_string();
+    app.queued_draft = Some(crate::tui::app::QueuedMessage::new(
+        "original queued follow-up".to_string(),
+        None,
+    ));
+
+    assert_eq!(
+        next_escape_action(&app, false),
+        EscapeAction::DiscardQueuedDraft
+    );
+}
+
+#[test]
 fn test_esc_is_noop_when_idle() {
     let mut app = create_test_app();
     app.is_loading = false;
@@ -4200,6 +4216,17 @@ fn test_esc_priority_order_matches_cancel_stack() {
     app.input.clear();
     assert_eq!(next_escape_action(&app, false), EscapeAction::CancelRequest);
 
+    app.queued_draft = Some(crate::tui::app::QueuedMessage::new(
+        "queued draft".to_string(),
+        None,
+    ));
+    app.input = "editing queued draft".to_string();
+    assert_eq!(
+        next_escape_action(&app, false),
+        EscapeAction::DiscardQueuedDraft
+    );
+
+    app.queued_draft = None;
     app.is_loading = false;
     app.input = "draft".to_string();
     assert_eq!(next_escape_action(&app, false), EscapeAction::ClearInput);
@@ -7199,6 +7226,42 @@ fn build_pending_input_preview_populates_all_three_buckets() {
     assert_eq!(preview.pending_steers, vec!["steer-msg".to_string()]);
     assert_eq!(preview.rejected_steers, vec!["rejected-msg".to_string()]);
     assert_eq!(preview.queued_messages, vec!["queued-msg".to_string()]);
+}
+
+#[test]
+fn accidental_queue_edit_while_loading_is_labeled_and_recoverable() {
+    let mut app = create_test_app();
+    app.is_loading = true;
+    app.queue_message(QueuedMessage::new(
+        "original queued follow-up".to_string(),
+        Some("skill body".to_string()),
+    ));
+
+    assert!(app.pop_last_queued_into_draft());
+    assert_eq!(app.input, "original queued follow-up");
+    app.input = "edited queued follow-up".to_string();
+    app.cursor_position = app.input.chars().count();
+
+    let preview = build_pending_input_preview(&app);
+    assert_eq!(
+        preview.editing_queued_message.as_deref(),
+        Some("edited queued follow-up")
+    );
+    assert!(
+        preview.queued_messages.is_empty(),
+        "the popped message should be shown as editing, not a second queued row"
+    );
+    assert_eq!(
+        next_escape_action(&app, false),
+        EscapeAction::DiscardQueuedDraft,
+        "Esc should cancel the queued edit before cancelling the live turn"
+    );
+
+    assert!(app.cancel_queued_draft_edit());
+    assert!(app.input.is_empty());
+    let restored = app.queued_messages.back().expect("follow-up restored");
+    assert_eq!(restored.display, "original queued follow-up");
+    assert_eq!(restored.skill_instruction.as_deref(), Some("skill body"));
 }
 
 #[test]

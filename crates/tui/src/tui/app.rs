@@ -4706,6 +4706,18 @@ impl App {
         true
     }
 
+    /// Stop editing a queued follow-up and put the original queued message back
+    /// at the tail where [`Self::pop_last_queued_into_draft`] took it from.
+    pub fn cancel_queued_draft_edit(&mut self) -> bool {
+        let Some(draft) = self.queued_draft.take() else {
+            return false;
+        };
+        self.queued_messages.push_back(draft);
+        self.clear_input_recoverable();
+        self.needs_redraw = true;
+        true
+    }
+
     /// Park a legacy pending steer. New keyboard handling routes running-turn
     /// drafts through Enter (same-turn steer) or Tab (next-turn follow-up).
     #[allow(dead_code)]
@@ -7172,6 +7184,33 @@ mod tests {
         assert!(!app.pop_last_queued_into_draft());
         assert!(app.input.is_empty());
         assert!(app.queued_draft.is_none());
+    }
+
+    #[test]
+    fn cancel_queued_draft_edit_restores_original_message() {
+        let mut app = App::new(test_options(false), &Config::default());
+        app.queue_message(QueuedMessage::new("first".to_string(), None));
+        app.queue_message(QueuedMessage::new(
+            "original follow-up".to_string(),
+            Some("skill".to_string()),
+        ));
+        assert!(app.pop_last_queued_into_draft());
+        app.input = "edited but not submitted".to_string();
+        app.cursor_position = char_count(&app.input);
+
+        assert!(app.cancel_queued_draft_edit());
+
+        assert!(app.input.is_empty());
+        assert!(app.queued_draft.is_none());
+        assert_eq!(app.queued_messages.len(), 2);
+        let restored = app.queued_messages.back().expect("restored message");
+        assert_eq!(restored.display, "original follow-up");
+        assert_eq!(restored.skill_instruction.as_deref(), Some("skill"));
+        assert_eq!(
+            app.clear_undo_buffer.as_deref(),
+            Some("edited but not submitted"),
+            "the interrupted edit remains recoverable via normal draft recovery"
+        );
     }
 
     #[test]

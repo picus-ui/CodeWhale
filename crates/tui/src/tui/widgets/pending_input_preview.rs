@@ -27,6 +27,7 @@ const PREVIEW_LINE_LIMIT: usize = 3;
 const PENDING_STEER_PREFIX: &str = "  ↳ Steer pending: ";
 const REJECTED_STEER_PREFIX: &str = "  ↳ Rejected steer: ";
 const QUEUED_MESSAGE_PREFIX: &str = "  ↳ Queued follow-up: ";
+const EDITING_QUEUED_PREFIX: &str = "  ↳ Editing queued follow-up: ";
 
 /// Description of the keybinding the hint line at the bottom should advertise
 /// for the "edit last queued message" action.
@@ -46,6 +47,7 @@ pub struct PendingInputPreview {
     pub pending_steers: Vec<String>,
     pub rejected_steers: Vec<String>,
     pub queued_messages: Vec<String>,
+    pub editing_queued_message: Option<String>,
     pub edit_binding: EditBinding,
 }
 
@@ -69,6 +71,7 @@ impl PendingInputPreview {
             pending_steers: Vec::new(),
             rejected_steers: Vec::new(),
             queued_messages: Vec::new(),
+            editing_queued_message: None,
             edit_binding: EditBinding::UP,
         }
     }
@@ -77,6 +80,7 @@ impl PendingInputPreview {
         !self.pending_steers.is_empty()
             || !self.rejected_steers.is_empty()
             || !self.queued_messages.is_empty()
+            || self.editing_queued_message.is_some()
     }
 
     /// Build the (possibly empty) ordered line list this widget would render
@@ -133,6 +137,21 @@ impl PendingInputPreview {
                     REJECTED_STEER_PREFIX,
                     &rejected_steer_indent,
                 );
+            }
+            if let Some(draft) = self.editing_queued_message.as_deref() {
+                let editing_indent = continuation_indent(EDITING_QUEUED_PREFIX);
+                push_truncated_item(
+                    &mut lines,
+                    draft,
+                    width,
+                    dim_italic,
+                    EDITING_QUEUED_PREFIX,
+                    &editing_indent,
+                );
+                lines.push(Line::from(vec![Span::styled(
+                    "    Esc restores queued follow-up".to_string(),
+                    dim,
+                )]));
             }
             let queued_message_indent = continuation_indent(QUEUED_MESSAGE_PREFIX);
             for message in &self.queued_messages {
@@ -372,6 +391,32 @@ mod tests {
     }
 
     #[test]
+    fn editing_queued_message_renders_explicit_state_and_restore_hint() {
+        let mut preview = PendingInputPreview::new();
+        preview.editing_queued_message = Some("revise before sending".to_string());
+
+        let rows = render_to_string(&preview, 80);
+
+        assert!(rows[0].contains("Pending inputs"));
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("Editing queued follow-up: revise before sending")),
+            "missing editing label: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("Esc restores queued follow-up")),
+            "missing restore hint: {rows:?}"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.contains("edit last queued message")),
+            "editing mode should not also advertise opening a queued edit: {rows:?}"
+        );
+    }
+
+    #[test]
     fn context_items_render_before_queue_buckets() {
         let mut preview = PendingInputPreview::new();
         preview.context_items.push(ContextPreviewItem {
@@ -460,6 +505,7 @@ mod tests {
         preview.pending_steers.push("steer".to_string());
         preview.rejected_steers.push("rejected".to_string());
         preview.queued_messages.push("queued".to_string());
+        preview.editing_queued_message = Some("editing".to_string());
 
         let rows = render_to_string(&preview, 80);
 
@@ -476,6 +522,11 @@ mod tests {
             rows.iter()
                 .any(|row| row.contains("Queued follow-up: queued")),
             "missing queued-follow-up label: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("Editing queued follow-up: editing")),
+            "missing queued-edit label: {rows:?}"
         );
     }
 
