@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moved the TUI Starlark execpolicy parser and PTY support behind non-OHOS
   target dependencies so published OpenHarmony builds no longer pull `nix` 0.28
   through `rustyline` or `portable-pty`.
+- Explicit `skills_dir` configuration is now unioned with workspace skill
+  discovery instead of being shadowed by workspace-local skills, and configured
+  skills take precedence over global defaults when prompt space is constrained.
 
 ### Community
 
@@ -64,7 +67,8 @@ prefix-cache stability work (#2517), **@xyuai** for canonical CodeWhale
 settings-path migration work (#2730), **@gaord** for the runtime thread
 workspace update API (#2640), **@shenjackyuanjie** for the
 HarmonyOS/OpenHarmony port and MatePad Edge validation trail (#2634), and
-**@idling11** for the PlanArtifact direction in Plan mode (#2733).
+**@idling11** for the PlanArtifact direction in Plan mode (#2733), and
+**@h3c-hexin** for the configured `skills_dir` merge fix (#2737).
 
 ## [0.8.53] - 2026-06-03
 

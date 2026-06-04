@@ -567,20 +567,41 @@ pub fn discover_in_workspace(workspace: &Path) -> SkillRegistry {
 }
 
 /// Discover skills from the workspace search set plus the configured install
-/// directory. Workspace/global directories keep their normal precedence; a
-/// custom configured directory is appended when it is outside that set.
+/// directory. Workspace-local directories keep their normal precedence; a
+/// custom configured directory is inserted before global defaults when it is
+/// outside that set so explicit configuration cannot be buried by large global
+/// libraries.
 #[must_use]
 pub fn discover_for_workspace_and_dir(workspace: &Path, skills_dir: &Path) -> SkillRegistry {
-    let dirs = skills_directories(workspace);
-    discover_for_workspace_dirs_and_dir(dirs, skills_dir)
+    let mut dirs = skills_directories(workspace);
+    insert_configured_skills_dir(&mut dirs, workspace, skills_dir);
+    discover_from_directories(dirs)
 }
 
-fn discover_for_workspace_dirs_and_dir(mut dirs: Vec<PathBuf>, skills_dir: &Path) -> SkillRegistry {
-    if skills_dir.is_dir() && !dirs.iter().any(|p| p == skills_dir) {
-        dirs.push(skills_dir.to_path_buf());
+fn insert_configured_skills_dir(dirs: &mut Vec<PathBuf>, workspace: &Path, skills_dir: &Path) {
+    if !skills_dir.is_dir() || dirs.iter().any(|p| paths_refer_to_same_dir(p, skills_dir)) {
+        return;
     }
 
-    discover_from_directories(dirs)
+    let workspace_root = fs::canonicalize(workspace).ok();
+    let insert_at = workspace_root
+        .as_ref()
+        .and_then(|root| {
+            dirs.iter()
+                .position(|dir| fs::canonicalize(dir).map_or(true, |dir| !dir.starts_with(root)))
+        })
+        .unwrap_or(dirs.len());
+    dirs.insert(insert_at, skills_dir.to_path_buf());
+}
+
+fn paths_refer_to_same_dir(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 pub(crate) fn discover_from_directories(dirs: impl IntoIterator<Item = PathBuf>) -> SkillRegistry {
@@ -605,8 +626,9 @@ fn discover_for_workspace_and_dir_with_home(
     skills_dir: &Path,
     home_dir: Option<&Path>,
 ) -> SkillRegistry {
-    let dirs = skills_directories_with_home(workspace, home_dir);
-    discover_for_workspace_dirs_and_dir(dirs, skills_dir)
+    let mut dirs = skills_directories_with_home(workspace, home_dir);
+    insert_configured_skills_dir(&mut dirs, workspace, skills_dir);
+    discover_from_directories(dirs)
 }
 
 /// Render the system-prompt skills block from every workspace
@@ -626,9 +648,21 @@ pub fn render_available_skills_context_for_workspace(workspace: &Path) -> Option
 /// Single-directory variant — use
 /// [`render_available_skills_context_for_workspace`] when scanning
 /// a workspace for cross-tool skill folders (#432).
+#[cfg(test)]
 #[must_use]
-pub fn render_available_skills_context(skills_dir: &Path) -> Option<String> {
+fn render_available_skills_context(skills_dir: &Path) -> Option<String> {
     let registry = SkillRegistry::discover(skills_dir);
+    render_skills_block(&registry)
+}
+
+/// Union variant: merge skills discovered in the `workspace` (cross-tool skill
+/// folders) and an explicitly-configured `skills_dir`.
+#[must_use]
+pub fn render_available_skills_context_for_workspace_and_dir(
+    workspace: &Path,
+    skills_dir: &Path,
+) -> Option<String> {
+    let registry = discover_for_workspace_and_dir(workspace, skills_dir);
     render_skills_block(&registry)
 }
 
@@ -1195,6 +1229,69 @@ mod tests {
         let rendered =
             super::render_available_skills_context_for_workspace(workspace).expect("non-empty");
         assert!(rendered.contains("from-claude"));
+    }
+
+    #[test]
+    fn discover_for_workspace_and_dir_merges_workspace_and_configured_sources() {
+        let tmpdir = TempDir::new().unwrap();
+        let workspace = tmpdir.path().join("workspace");
+        let home = tmpdir.path().join("home");
+        let configured_dir = tmpdir.path().join("configured-skills");
+        std::fs::create_dir_all(&workspace).unwrap();
+        write_skill(
+            &workspace.join(".claude").join("skills"),
+            "workspace-skill",
+            "workspace visible skill",
+            "body",
+        );
+        write_skill(
+            &configured_dir,
+            "configured-skill",
+            "configured visible skill",
+            "body",
+        );
+
+        let registry = super::discover_for_workspace_and_dir_with_home(
+            &workspace,
+            &configured_dir,
+            Some(&home),
+        );
+        let names: Vec<&str> = registry.list().iter().map(|s| s.name.as_str()).collect();
+
+        assert!(names.contains(&"workspace-skill"));
+        assert!(names.contains(&"configured-skill"));
+    }
+
+    #[test]
+    fn explicit_configured_skills_dir_precedes_global_defaults() {
+        let tmpdir = TempDir::new().unwrap();
+        let workspace = tmpdir.path().join("workspace");
+        let home = tmpdir.path().join("home");
+        let configured_dir = tmpdir.path().join("configured-skills");
+        std::fs::create_dir_all(&workspace).unwrap();
+        write_skill(
+            &home.join(".agents").join("skills"),
+            "shared-skill",
+            "global skill",
+            "global body",
+        );
+        write_skill(
+            &configured_dir,
+            "shared-skill",
+            "configured skill",
+            "configured body",
+        );
+
+        let registry = super::discover_for_workspace_and_dir_with_home(
+            &workspace,
+            &configured_dir,
+            Some(&home),
+        );
+        let skill = registry
+            .get("shared-skill")
+            .expect("shared skill discovered");
+
+        assert_eq!(skill.description, "configured skill");
     }
 
     /// Regression for the GitHub issue where users organize skills under

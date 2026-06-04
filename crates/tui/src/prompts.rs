@@ -1068,13 +1068,16 @@ pub fn system_prompt_for_mode_with_context_skills_session_and_approval(
     // skills directory (`.agents/skills`, `skills`,
     // `.opencode/skills`, `.claude/skills`, `.cursor/skills`) plus global
     // `~/.agents/skills` / `~/.deepseek/skills` so skills installed for any
-    // AI-tool convention show up in the catalogue. The legacy
-    // single-`skills_dir` path is
-    // honoured as a fallback for callers that don't supply a
-    // workspace-aware view; it falls through to the same merged
-    // registry when available.
-    let skills_block = crate::skills::render_available_skills_context_for_workspace(workspace)
-        .or_else(|| skills_dir.and_then(crate::skills::render_available_skills_context));
+    // AI-tool convention show up in the catalogue. When an explicit
+    // `skills_dir` is configured, union it with the workspace view instead of
+    // treating it as a fallback; the workspace view often returns Some and
+    // would otherwise shadow the configured directory entirely.
+    let skills_block = match skills_dir {
+        Some(dir) => {
+            crate::skills::render_available_skills_context_for_workspace_and_dir(workspace, dir)
+        }
+        None => crate::skills::render_available_skills_context_for_workspace(workspace),
+    };
     if let Some(block) = skills_block {
         full_prompt = format!("{full_prompt}\n\n{block}");
     }
@@ -1481,6 +1484,76 @@ mod tests {
             text.contains("The Constitution of CodeWhale (Articles I-VII) governs your behavior"),
             "authority recap must reference the Constitution"
         );
+    }
+
+    #[test]
+    fn system_prompt_merges_workspace_and_configured_skills_dir() {
+        let _env_guard = crate::test_support::lock_test_env();
+        let tmp = tempdir().expect("tempdir");
+        let _home = ScopedHome::set(tmp.path().join("home"));
+        let workspace = tmp.path().join("workspace");
+        let configured_dir = tmp.path().join("configured-skills");
+        write_test_skill(
+            &workspace.join(".claude").join("skills"),
+            "workspace-skill",
+            "workspace skill",
+        );
+        write_test_skill(&configured_dir, "configured-skill", "configured skill");
+
+        let text = match system_prompt_for_mode_with_context_and_skills(
+            AppMode::Plan,
+            &workspace,
+            None,
+            Some(&configured_dir),
+            None,
+            None,
+        ) {
+            SystemPrompt::Text(text) => text,
+            SystemPrompt::Blocks(_) => panic!("expected text system prompt"),
+        };
+
+        assert!(text.contains("workspace-skill"));
+        assert!(text.contains("configured-skill"));
+    }
+
+    struct ScopedHome {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl ScopedHome {
+        fn set(path: std::path::PathBuf) -> Self {
+            let previous = std::env::var_os("HOME");
+            // Safety: this test serializes environment access with
+            // lock_test_env and restores HOME in Drop.
+            unsafe {
+                std::env::set_var("HOME", path);
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for ScopedHome {
+        fn drop(&mut self) {
+            // Safety: this test serializes environment access with
+            // lock_test_env and restores HOME in Drop.
+            unsafe {
+                if let Some(previous) = self.previous.take() {
+                    std::env::set_var("HOME", previous);
+                } else {
+                    std::env::remove_var("HOME");
+                }
+            }
+        }
+    }
+
+    fn write_test_skill(root: &std::path::Path, name: &str, description: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).expect("skill dir");
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n"),
+        )
+        .expect("skill file");
     }
 
     #[test]
