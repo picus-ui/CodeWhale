@@ -396,6 +396,7 @@ impl ShellChild {
         }
     }
 
+    #[cfg(not(windows))]
     fn kill(&mut self) -> std::io::Result<()> {
         match self {
             #[cfg(unix)]
