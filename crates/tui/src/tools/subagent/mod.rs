@@ -2192,7 +2192,6 @@ pub fn new_shared_subagent_manager_with_timeout(
 // === Tool Implementations ===
 
 /// Open a named background sub-agent session.
-#[allow(dead_code)] // Registered by the adjacent v0.8.33 registry surface update.
 pub struct AgentOpenTool {
     manager: SharedSubAgentManager,
     runtime: SubAgentRuntime,
