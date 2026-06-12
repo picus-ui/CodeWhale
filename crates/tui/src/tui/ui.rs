@@ -3011,13 +3011,20 @@ async fn run_event_loop(
             // User interaction — clear the ✅ completion marker from the title.
             crate::tui::notifications::reset_title_on_interaction();
 
-            let Event::Key(key) = evt else {
+            let Event::Key(mut key) = evt else {
                 continue;
             };
 
             if key.kind != KeyEventKind::Press {
                 continue;
             }
+
+            // Normalize macOS modifiers: map SUPER (Cmd) to CONTROL so that
+            // keyboard shortcuts work consistently across terminal emulators
+            // (Terminal.app, iTerm2, Kitty, etc.) that may report different
+            // modifier flags (#2938).
+            let mapped = crate::tui::composer_ui::normalize_macos_modifiers(key.modifiers);
+            key.modifiers = mapped;
 
             // Decision card keyboard routing (v0.8.43 truth-surface).
             // When a card is active, number keys 1-9 select options,

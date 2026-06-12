@@ -298,6 +298,35 @@ fn word_cursor_modifier_accepts_control_and_alt() {
     assert!(!is_word_cursor_modifier(KeyModifiers::SHIFT));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn normalize_macos_modifiers_maps_super_to_control() {
+    use crate::tui::composer_ui::normalize_macos_modifiers;
+    // SUPER (Cmd) without CONTROL should gain CONTROL and lose SUPER.
+    let normalized = normalize_macos_modifiers(KeyModifiers::SUPER);
+    assert!(normalized.contains(KeyModifiers::CONTROL));
+    assert!(!normalized.contains(KeyModifiers::SUPER));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn normalize_macos_modifiers_preserves_existing_control() {
+    use crate::tui::composer_ui::normalize_macos_modifiers;
+    // CONTROL already set — SUPER should be removed.
+    let normalized = normalize_macos_modifiers(KeyModifiers::CONTROL | KeyModifiers::SUPER);
+    assert!(normalized.contains(KeyModifiers::CONTROL));
+    assert!(!normalized.contains(KeyModifiers::SUPER));
+}
+
+#[test]
+fn normalize_macos_modifiers_leaves_alt_unchanged() {
+    use crate::tui::composer_ui::normalize_macos_modifiers;
+    let normalized = normalize_macos_modifiers(KeyModifiers::ALT);
+    // On non-macOS this is a no-op; on macOS ALT stays unchanged.
+    assert!(normalized.contains(KeyModifiers::ALT));
+    assert!(!normalized.contains(KeyModifiers::SUPER));
+}
+
 #[test]
 fn alt_f_and_alt_b_move_by_word_without_inserting_text() {
     let mut app = create_test_app();
