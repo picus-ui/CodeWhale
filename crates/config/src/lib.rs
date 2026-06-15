@@ -3,7 +3,6 @@ pub mod provider;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-#[cfg(unix)]
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
@@ -377,7 +376,7 @@ pub struct ProvidersToml {
 ///
 /// This slice is intentionally ask-only: each rule is a typed condition that
 /// means "ask before this tool invocation." Typed allow/deny records and UI
-/// persistence are expected to land in follow-up PRs.
+/// actions are expected to land in follow-up PRs.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PermissionsToml {
@@ -3391,6 +3390,70 @@ impl ConfigStore {
             ExecPolicyEngine::with_rulesets(vec![self.permissions.ruleset()])
         }
     }
+
+    /// Atomically append ask-only permission rules to the sibling
+    /// `permissions.toml` file.
+    ///
+    /// Existing comments and formatting are preserved. Exact duplicate rules
+    /// are ignored, and the in-memory permissions snapshot is refreshed after
+    /// a successful write.
+    pub fn append_ask_rules(&mut self, rules: &[ToolAskRule]) -> Result<usize> {
+        if rules.is_empty() {
+            return Ok(0);
+        }
+
+        let path = self.permissions_path();
+        let raw = if path.exists() {
+            fs::read_to_string(&path)
+                .with_context(|| format!("failed to read permissions at {}", path.display()))?
+        } else {
+            String::new()
+        };
+        let mut permissions = if raw.trim().is_empty() {
+            PermissionsToml::default()
+        } else {
+            toml::from_str(&raw)
+                .with_context(|| format!("failed to parse permissions at {}", path.display()))?
+        };
+        let mut document = if raw.trim().is_empty() {
+            toml_edit::DocumentMut::new()
+        } else {
+            raw.parse::<toml_edit::DocumentMut>()
+                .with_context(|| format!("failed to edit permissions at {}", path.display()))?
+        };
+
+        if !document.contains_key("rules") {
+            document["rules"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+        }
+        let rules_item = document
+            .get_mut("rules")
+            .expect("rules entry was inserted above");
+
+        let mut added = 0;
+        for rule in rules {
+            if permissions.rules.contains(rule) {
+                continue;
+            }
+            append_ask_rule(rules_item, rule)?;
+            permissions.rules.push(rule.clone());
+            added += 1;
+        }
+        if added == 0 {
+            self.permissions = permissions;
+            return Ok(0);
+        }
+
+        let body = document.to_string();
+        let persisted: PermissionsToml = toml::from_str(&body).with_context(|| {
+            format!(
+                "generated invalid permissions document for {}",
+                path.display()
+            )
+        })?;
+        write_permissions_atomic(&path, body.as_bytes())?;
+        self.permissions = persisted;
+        Ok(added)
+    }
 }
 
 /// Process-wide default [`Secrets`] façade. The first caller wins; the
@@ -3564,6 +3627,91 @@ fn load_sibling_permissions(config_path: &Path) -> Result<PermissionsToml> {
             permissions_path.display()
         )
     })
+}
+
+fn append_ask_rule(item: &mut toml_edit::Item, rule: &ToolAskRule) -> Result<()> {
+    match item {
+        toml_edit::Item::ArrayOfTables(rules) => {
+            rules.push(ask_rule_table(rule));
+            Ok(())
+        }
+        toml_edit::Item::Value(value) => {
+            let Some(rules) = value.as_array_mut() else {
+                bail!("`rules` in permissions.toml must be an array");
+            };
+            rules.push(toml_edit::Value::InlineTable(ask_rule_inline_table(rule)));
+            Ok(())
+        }
+        _ => bail!("`rules` in permissions.toml must be an array"),
+    }
+}
+
+fn ask_rule_table(rule: &ToolAskRule) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    table["tool"] = toml_edit::value(rule.tool.clone());
+    if let Some(command) = rule.command.as_deref() {
+        table["command"] = toml_edit::value(command);
+    }
+    if let Some(path) = rule.path.as_deref() {
+        table["path"] = toml_edit::value(path);
+    }
+    table
+}
+
+fn ask_rule_inline_table(rule: &ToolAskRule) -> toml_edit::InlineTable {
+    let mut table = toml_edit::InlineTable::new();
+    table.insert("tool", toml_edit::Value::from(rule.tool.clone()));
+    if let Some(command) = rule.command.as_deref() {
+        table.insert("command", toml_edit::Value::from(command));
+    }
+    if let Some(path) = rule.path.as_deref() {
+        table.insert("path", toml_edit::Value::from(path));
+    }
+    table
+}
+
+fn write_permissions_atomic(path: &Path, body: &[u8]) -> Result<()> {
+    let parent = path.parent().with_context(|| {
+        format!(
+            "permissions path has no parent directory: {}",
+            path.display()
+        )
+    })?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create permissions directory {}",
+            parent.display()
+        )
+    })?;
+
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).with_context(|| {
+        format!(
+            "failed to create temporary permissions file in {}",
+            parent.display()
+        )
+    })?;
+    #[cfg(unix)]
+    temporary
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .with_context(|| {
+            format!(
+                "failed to secure temporary permissions file for {}",
+                path.display()
+            )
+        })?;
+    temporary
+        .write_all(body)
+        .with_context(|| format!("failed to write permissions at {}", path.display()))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .with_context(|| format!("failed to sync permissions at {}", path.display()))?;
+    temporary
+        .persist(path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("failed to replace permissions at {}", path.display()))?;
+    Ok(())
 }
 
 pub fn default_config_path() -> Result<PathBuf> {
@@ -4364,6 +4512,152 @@ action = "mode.agent"
         );
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn config_store_appends_ask_rules_without_losing_comments_or_duplicates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join(CONFIG_FILE_NAME);
+        let permissions_path = dir.path().join(PERMISSIONS_FILE_NAME);
+        fs::write(&config_path, "model = \"deepseek-v4-flash\"\n").expect("write config");
+        fs::write(
+            &permissions_path,
+            r#"# keep this permission note
+[[rules]]
+tool = "exec_shell"
+command = "cargo check"
+"#,
+        )
+        .expect("write permissions");
+
+        let mut store = ConfigStore::load(Some(config_path)).expect("load config store");
+        let existing = ToolAskRule::exec_shell("cargo check");
+        let added_rule = ToolAskRule::file_path("read_file", "docs/README.md");
+        let added = store
+            .append_ask_rules(&[existing, added_rule.clone(), added_rule.clone()])
+            .expect("append ask rules");
+
+        assert_eq!(added, 1);
+        assert_eq!(
+            store.permissions().rules,
+            vec![ToolAskRule::exec_shell("cargo check"), added_rule.clone(),]
+        );
+        let body = fs::read_to_string(&permissions_path).expect("read permissions");
+        assert!(body.contains("# keep this permission note"));
+        assert_eq!(body.matches("docs/README.md").count(), 1);
+        assert!(!body.contains("decision"));
+
+        let before_duplicate_append = body;
+        assert_eq!(
+            store
+                .append_ask_rules(&[added_rule])
+                .expect("dedupe ask rule"),
+            0
+        );
+        assert_eq!(
+            fs::read_to_string(&permissions_path).expect("read unchanged permissions"),
+            before_duplicate_append
+        );
+
+        let reloaded = ConfigStore::load(Some(dir.path().join(CONFIG_FILE_NAME)))
+            .expect("reload config store");
+        assert_eq!(reloaded.permissions(), store.permissions());
+    }
+
+    #[test]
+    fn config_store_appends_ask_rule_to_inline_rules_array() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join(CONFIG_FILE_NAME);
+        let permissions_path = dir.path().join(PERMISSIONS_FILE_NAME);
+        fs::write(
+            &permissions_path,
+            "# inline rules stay valid\nrules = [{ tool = \"exec_shell\", command = \"cargo check\" }]\n",
+        )
+        .expect("write permissions");
+
+        let mut store = ConfigStore::load(Some(config_path)).expect("load config store");
+        assert_eq!(
+            store
+                .append_ask_rules(&[ToolAskRule::file_path("read_file", "README.md")])
+                .expect("append inline ask rule"),
+            1
+        );
+
+        let body = fs::read_to_string(&permissions_path).expect("read permissions");
+        assert!(body.contains("# inline rules stay valid"));
+        let parsed: PermissionsToml = toml::from_str(&body).expect("parse persisted permissions");
+        assert_eq!(
+            parsed.rules,
+            vec![
+                ToolAskRule::exec_shell("cargo check"),
+                ToolAskRule::file_path("read_file", "README.md"),
+            ]
+        );
+    }
+
+    #[test]
+    fn config_store_does_not_overwrite_invalid_permissions_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join(CONFIG_FILE_NAME);
+        let permissions_path = dir.path().join(PERMISSIONS_FILE_NAME);
+        let mut store = ConfigStore::load(Some(config_path)).expect("load config store");
+        let invalid = "rules = \"not-an-array\"\n";
+        fs::write(&permissions_path, invalid).expect("write invalid permissions");
+
+        let error = store
+            .append_ask_rules(&[ToolAskRule::exec_shell("cargo test")])
+            .expect_err("invalid permissions should fail");
+
+        assert!(error.to_string().contains("failed to parse permissions"));
+        assert_eq!(
+            fs::read_to_string(&permissions_path).expect("read invalid permissions"),
+            invalid
+        );
+        assert!(store.permissions().is_empty());
+    }
+
+    #[test]
+    fn duplicate_append_refreshes_permissions_changed_on_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join(CONFIG_FILE_NAME);
+        let permissions_path = dir.path().join(PERMISSIONS_FILE_NAME);
+        let mut store = ConfigStore::load(Some(config_path)).expect("load config store");
+        fs::write(
+            permissions_path,
+            "[[rules]]\ntool = \"exec_shell\"\ncommand = \"cargo check\"\n",
+        )
+        .expect("write external permissions update");
+
+        assert_eq!(
+            store
+                .append_ask_rules(&[ToolAskRule::exec_shell("cargo check")])
+                .expect("dedupe external ask rule"),
+            0
+        );
+        assert_eq!(
+            store.permissions().rules,
+            vec![ToolAskRule::exec_shell("cargo check")]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_store_secures_persisted_permissions_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join(CONFIG_FILE_NAME);
+        let permissions_path = dir.path().join(PERMISSIONS_FILE_NAME);
+        let mut store = ConfigStore::load(Some(config_path)).expect("load config store");
+
+        store
+            .append_ask_rules(&[ToolAskRule::exec_shell("cargo test")])
+            .expect("append ask rule");
+
+        let mode = fs::metadata(permissions_path)
+            .expect("permissions metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     struct EnvGuard {

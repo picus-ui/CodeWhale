@@ -13,5 +13,7 @@ codewhale-secrets = { path = "../secrets", version = "0.8.61" }
 dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
