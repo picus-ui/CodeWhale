@@ -6,10 +6,11 @@ limited to provider IDs, config keys, auth paths, base URLs, model resolution,
 and capability metadata that the code already knows about.
 
 DeepSeek remains the first-class default provider. NVIDIA NIM, OpenRouter,
-Volcengine Ark, Xiaomi MiMo, Novita, Fireworks, SiliconFlow, Arcee AI, generic
-OpenAI-compatible endpoints, self-hosted runtimes, Moonshot/Kimi, and Hugging
-Face Inference Providers are additive routes for running the same terminal
-harness against other hosted or local model endpoints.
+Volcengine Ark, Xiaomi MiMo, Novita, Fireworks, SiliconFlow, Arcee AI,
+DeepInfra, Together AI, Z.ai, StepFun, MiniMax, generic OpenAI-compatible
+endpoints, self-hosted runtimes, Moonshot/Kimi, and Hugging Face Inference
+Providers are additive routes for running the same terminal harness against
+other hosted or local model endpoints.
 
 Sources to keep in sync:
 

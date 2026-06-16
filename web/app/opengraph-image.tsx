@@ -28,7 +28,7 @@ export default function OpengraphImage() {
             alignItems: "center",
             gap: 16,
             fontSize: 26,
-            letterSpacing: "0.18em",
+            letterSpacing: 0,
             textTransform: "uppercase",
             color: "#6B7280",
           }}
@@ -42,7 +42,7 @@ export default function OpengraphImage() {
               fontSize: 116,
               fontWeight: 700,
               color: "#FFFFFF",
-              letterSpacing: "-0.018em",
+              letterSpacing: 0,
             }}
           >
             CodeWhale

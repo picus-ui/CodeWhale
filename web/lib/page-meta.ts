@@ -11,7 +11,7 @@ export const IDENTITY_PHRASE =
 
 /** Shared OG card rendered by app/opengraph-image.tsx (1200×630 PNG). */
 const OG_IMAGE = {
-  url: "/opengraph-image",
+  url: `${SITE_URL}/opengraph-image`,
   width: 1200,
   height: 630,
   alt: `${SITE_NAME} — ${IDENTITY_PHRASE}`,

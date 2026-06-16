@@ -18,7 +18,7 @@ export interface RepoFacts {
 }
 
 export const FACTS: RepoFacts = {
-  "generatedAt": "2026-06-15T13:15:14.443Z",
+  "generatedAt": "2026-06-16T08:03:17.993Z",
   "version": "0.8.61",
   "crates": [
     "agent",
@@ -165,6 +165,11 @@ export const FACTS: RepoFacts = {
       "id": "minimax",
       "label": "MiniMax",
       "env": "MINIMAX_API_KEY"
+    },
+    {
+      "id": "deepinfra",
+      "label": "DeepInfra",
+      "env": "DEEPINFRA_API_KEY / DEEPINFRA_TOKEN"
     }
   ],
   "defaultModel": "deepseek-v4-pro",

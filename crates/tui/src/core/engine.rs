@@ -660,6 +660,7 @@ impl Engine {
             ApiProvider::Vllm => "VLLM_API_KEY",
             ApiProvider::Ollama => "OLLAMA_API_KEY",
             ApiProvider::Huggingface => "HUGGINGFACE_API_KEY/HF_TOKEN",
+            ApiProvider::Deepinfra => "DEEPINFRA_API_KEY/DEEPINFRA_TOKEN",
             ApiProvider::Together => "TOGETHER_API_KEY",
             ApiProvider::OpenaiCodex => "OPENAI_CODEX_ACCESS_TOKEN/CODEX_ACCESS_TOKEN",
             ApiProvider::Minimax => "MINIMAX_API_KEY",

@@ -376,7 +376,7 @@ pub struct ProvidersToml {
     pub stepfun: ProviderConfigToml,
     #[serde(default, alias = "mini-max", alias = "mini_max", alias = "minimax")]
     pub minimax: ProviderConfigToml,
-    #[serde(default)]
+    #[serde(default, alias = "deep-infra", alias = "deep_infra")]
     pub deepinfra: ProviderConfigToml,
 }
 
@@ -6190,6 +6190,14 @@ unix_socket_path = "/tmp/cw-hooks.sock"
             let parsed: ConfigToml =
                 toml::from_str(&format!("provider = \"{alias}\"")).expect("huggingface alias");
             assert_eq!(parsed.provider, ProviderKind::Huggingface);
+        }
+
+        for alias in ["deepinfra", "deep-infra", "deep_infra"] {
+            assert_eq!(ProviderKind::parse(alias), Some(ProviderKind::Deepinfra));
+
+            let parsed: ConfigToml =
+                toml::from_str(&format!("provider = \"{alias}\"")).expect("deepinfra alias");
+            assert_eq!(parsed.provider, ProviderKind::Deepinfra);
         }
 
         let parsed: ConfigToml =

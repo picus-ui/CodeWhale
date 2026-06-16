@@ -2,10 +2,10 @@
 
 > The terminal coding agent for any model — open models first.
 
-A Rust TUI and CLI, 24 providers. DeepSeek, OpenRouter, Hugging Face, and local
-vLLM/SGLang/Ollama are first-class routes, and CodeWhale speaks natively to
-Anthropic Claude and OpenAI when that's what you have. Approval-gated tools, OS
-sandboxing, and `/restore` rollback for every turn.
+A Rust TUI and CLI, 25 providers. DeepSeek, OpenRouter, Hugging Face,
+DeepInfra, and local vLLM/SGLang/Ollama are first-class routes, and CodeWhale
+speaks natively to Anthropic Claude and OpenAI when that's what you have.
+Approval-gated tools, OS sandboxing, and `/restore` rollback for every turn.
 
 [简体中文 README](README.zh-CN.md) · [日本語 README](README.ja-JP.md) · [Tiếng Việt README](README.vi.md) · [codewhale.net](https://codewhale.net/) · [Install guide](docs/INSTALL.md) · [Provider registry](docs/PROVIDERS.md) · [Changelog](CHANGELOG.md)
 
@@ -127,14 +127,14 @@ rails are runtime mechanisms, not advice the model has to remember:
 
 ### Any model, open models first
 
-Twenty-four providers route through the same harness, same constitution, same
+Twenty-five providers route through the same harness, same constitution, same
 tools:
 
 - **Open models, hosted:** `deepseek` (first among equals), `openrouter`,
   `huggingface` (Inference Providers), `moonshot` (Kimi), `zai` (GLM),
   `minimax`, `volcengine` (Ark), `nvidia-nim`, `together`, `fireworks`,
   `novita`, `siliconflow` / `siliconflow-CN`, `arcee`, `xiaomi-mimo`,
-  `stepfun`, `atlascloud`, `wanjie-ark`, plus a generic `openai`-compatible
+  `deepinfra`, `stepfun`, `atlascloud`, `wanjie-ark`, plus a generic `openai`-compatible
   route for any gateway.
 - **Open models, self-hosted:** `vllm`, `sglang`, and `ollama` against your
   own localhost endpoints — no key required.

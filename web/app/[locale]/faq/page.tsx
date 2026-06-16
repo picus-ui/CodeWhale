@@ -114,7 +114,7 @@ codewhale doctor         # full connectivity check`}
         <ul className="list-disc pl-5 space-y-1 text-sm text-ink-soft mb-3">
           <li><strong>DeepSeek</strong> — first-class, native API. Reasoning streaming, cache metrics, thinking effort control.</li>
           <li><strong>OpenRouter</strong> — unified API for DeepSeek models and other open-model routes.</li>
-          <li><strong>OpenAI-compatible</strong>, <strong>NVIDIA NIM</strong>, <strong>AtlasCloud</strong>, <strong>Wanjie Ark</strong>, <strong>Volcengine Ark</strong>, <strong>Xiaomi MiMo</strong>, <strong>Novita</strong>, <strong>Fireworks</strong>, <strong>SiliconFlow</strong>, <strong>SiliconFlow CN</strong>, <strong>Arcee AI</strong>, <strong>Moonshot/Kimi</strong>, <strong>Hugging Face</strong>, <strong>SGLang</strong>, <strong>vLLM</strong>, <strong>Ollama</strong></li>
+          <li><strong>OpenAI-compatible</strong>, <strong>NVIDIA NIM</strong>, <strong>AtlasCloud</strong>, <strong>Wanjie Ark</strong>, <strong>Volcengine Ark</strong>, <strong>Xiaomi MiMo</strong>, <strong>Novita</strong>, <strong>Fireworks</strong>, <strong>SiliconFlow</strong>, <strong>SiliconFlow CN</strong>, <strong>Arcee AI</strong>, <strong>Moonshot/Kimi</strong>, <strong>Hugging Face</strong>, <strong>DeepInfra</strong>, <strong>Together AI</strong>, <strong>Z.ai</strong>, <strong>StepFun</strong>, <strong>MiniMax</strong>, <strong>OpenAI Codex</strong>, <strong>Anthropic</strong>, <strong>SGLang</strong>, <strong>vLLM</strong>, <strong>Ollama</strong></li>
         </ul>
         <p>
           Set the corresponding env var (e.g. <code className="inline">OPENROUTER_API_KEY</code>) and your provider in <code className="inline">~/.codewhale/config.toml</code>.
@@ -429,7 +429,7 @@ codewhale doctor         # 完整连接检查`}
         <ul className="list-disc pl-5 space-y-1 text-sm text-ink-soft mb-3">
           <li><strong>DeepSeek</strong> — 一级支持，原生 API。推理流、缓存指标、思考力度控制。</li>
           <li><strong>OpenRouter</strong> — 统一 API，可访问 DeepSeek 和其他开放模型路由。</li>
-          <li><strong>OpenAI 兼容</strong>、<strong>NVIDIA NIM</strong>、<strong>AtlasCloud</strong>、<strong>Wanjie Ark</strong>、<strong>Volcengine Ark</strong>、<strong>Xiaomi MiMo</strong>、<strong>Novita</strong>、<strong>Fireworks</strong>、<strong>SiliconFlow</strong>、<strong>SiliconFlow CN</strong>、<strong>Arcee AI</strong>、<strong>Moonshot/Kimi</strong>、<strong>Hugging Face</strong>、<strong>SGLang</strong>、<strong>vLLM</strong>、<strong>Ollama</strong></li>
+          <li><strong>OpenAI 兼容</strong>、<strong>NVIDIA NIM</strong>、<strong>AtlasCloud</strong>、<strong>Wanjie Ark</strong>、<strong>Volcengine Ark</strong>、<strong>Xiaomi MiMo</strong>、<strong>Novita</strong>、<strong>Fireworks</strong>、<strong>SiliconFlow</strong>、<strong>SiliconFlow CN</strong>、<strong>Arcee AI</strong>、<strong>Moonshot/Kimi</strong>、<strong>Hugging Face</strong>、<strong>DeepInfra</strong>、<strong>Together AI</strong>、<strong>Z.ai</strong>、<strong>StepFun</strong>、<strong>MiniMax</strong>、<strong>OpenAI Codex</strong>、<strong>Anthropic</strong>、<strong>SGLang</strong>、<strong>vLLM</strong>、<strong>Ollama</strong></li>
         </ul>
         <p>
           设置对应的环境变量（如 <code className="inline">OPENROUTER_API_KEY</code>）并在 <code className="inline">~/.codewhale/config.toml</code> 中配置你的提供商。

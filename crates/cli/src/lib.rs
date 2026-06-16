@@ -47,6 +47,8 @@ enum ProviderArg {
     Zai,
     Stepfun,
     Minimax,
+    #[value(alias = "deep-infra", alias = "deep_infra")]
+    Deepinfra,
 }
 
 impl From<ProviderArg> for ProviderKind {
@@ -75,6 +77,7 @@ impl From<ProviderArg> for ProviderKind {
             ProviderArg::Zai => ProviderKind::Zai,
             ProviderArg::Stepfun => ProviderKind::Stepfun,
             ProviderArg::Minimax => ProviderKind::Minimax,
+            ProviderArg::Deepinfra => ProviderKind::Deepinfra,
         }
     }
 }
@@ -3002,6 +3005,8 @@ mod tests {
             ("zai", ProviderArg::Zai),
             ("stepfun", ProviderArg::Stepfun),
             ("minimax", ProviderArg::Minimax),
+            ("deepinfra", ProviderArg::Deepinfra),
+            ("deep-infra", ProviderArg::Deepinfra),
         ] {
             let cli = parse_ok(&[
                 "deepseek",

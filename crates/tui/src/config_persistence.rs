@@ -215,6 +215,7 @@ fn provider_base_url_table_key(provider: ApiProvider) -> anyhow::Result<&'static
         ApiProvider::Siliconflow | ApiProvider::SiliconflowCn => Ok("siliconflow"),
         ApiProvider::Arcee => Ok("arcee"),
         ApiProvider::Huggingface => Ok("huggingface"),
+        ApiProvider::Deepinfra => Ok("deepinfra"),
         ApiProvider::Moonshot => Ok("moonshot"),
         ApiProvider::Sglang => Ok("sglang"),
         ApiProvider::Vllm => Ok("vllm"),

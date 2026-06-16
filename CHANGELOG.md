@@ -106,7 +106,7 @@ folds in several community contributions.
 - `DEEPSEEK_BASE_URL` / `MODEL` honored in `exec` — thanks @hongchen1993 (#3221)
 - VS Code read-only API documentation — thanks @cyq1017 (#3013)
 - Atomic ask-only permission rule persistence — thanks @greyfreedom (#3233)
-- DeepInfra provider support — thanks @idling11 (#3235, closes #3231)
+- DeepInfra provider support and release-surface follow-through — thanks @idling11 (#3235, closes #3231) and @nightt5879 (#3236)
 - Editable oversized paste composer flow — thanks @idling11 (#3267, closes #3263)
 - WeChat bridge (`integrations/weixin-bridge` via Feishu + Tencent OpenClaw) — thanks @VincentCorleone (#3206)
 - Config robustness: atomic permission-rule save, one-time config `.bak` backup before the first changed write, `CODEWHALE_HOME` as primary config home, and accepting the dispatcher-written config shape (camelCase aliases + `[features.enabled]` table) so legacy/dual-written configs parse cleanly

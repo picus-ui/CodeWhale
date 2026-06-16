@@ -1257,6 +1257,7 @@ pub(super) fn apply_reasoning_effort(
             | ApiProvider::SiliconflowCn
             | ApiProvider::Sglang
             | ApiProvider::Volcengine
+            | ApiProvider::Deepinfra
             | ApiProvider::Together
             | ApiProvider::Atlascloud
             | ApiProvider::Zai => {
@@ -1315,6 +1316,7 @@ pub(super) fn apply_reasoning_effort(
             | ApiProvider::SiliconflowCn
             | ApiProvider::Sglang
             | ApiProvider::Volcengine
+            | ApiProvider::Deepinfra
             | ApiProvider::Atlascloud => {
                 body["reasoning_effort"] = json!("high");
                 body["thinking"] = json!({ "type": "enabled" });
@@ -1397,6 +1399,7 @@ pub(super) fn apply_reasoning_effort(
             | ApiProvider::SiliconflowCn
             | ApiProvider::Sglang
             | ApiProvider::Volcengine
+            | ApiProvider::Deepinfra
             | ApiProvider::Atlascloud => {
                 body["reasoning_effort"] = json!("max");
                 body["thinking"] = json!({ "type": "enabled" });

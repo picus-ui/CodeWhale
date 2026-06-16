@@ -94,6 +94,7 @@ function deriveProvidersFromConfig(cfg: string): ProviderFact[] {
     Vllm: { id: "vllm", label: "vLLM", env: "VLLM_API_KEY" },
     Ollama: { id: "ollama", label: "Ollama", env: "OLLAMA_API_KEY" },
     Huggingface: { id: "huggingface", label: "Hugging Face", env: "HUGGINGFACE_API_KEY / HF_TOKEN" },
+    Deepinfra: { id: "deepinfra", label: "DeepInfra", env: "DEEPINFRA_API_KEY / DEEPINFRA_TOKEN" },
     Together: { id: "together", label: "Together AI", env: "TOGETHER_API_KEY" },
     OpenaiCodex: { id: "openai-codex", label: "OpenAI Codex", env: "ChatGPT/Codex OAuth via `codex login` (OPENAI_CODEX_ACCESS_TOKEN / CODEX_ACCESS_TOKEN override)" },
     Anthropic: { id: "anthropic", label: "Anthropic", env: "ANTHROPIC_API_KEY" },

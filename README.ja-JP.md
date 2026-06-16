@@ -2,7 +2,7 @@
 
 > あらゆるモデルのためのターミナルコーディングエージェント — オープンモデルを最優先に。
 
-Rust 製の TUI と CLI、24 のプロバイダ。DeepSeek、OpenRouter、Hugging Face、ローカルの vLLM/SGLang/Ollama を第一級のルートとして扱い、手元にあるのが Anthropic Claude や OpenAI のキーなら、それらの API もネイティブに扱えます。承認ゲート付きツール、OS サンドボックス、そして全ターンを巻き戻せる `/restore`。
+Rust 製の TUI と CLI、25 のプロバイダ。DeepSeek、OpenRouter、Hugging Face、DeepInfra、ローカルの vLLM/SGLang/Ollama を第一級のルートとして扱い、手元にあるのが Anthropic Claude や OpenAI のキーなら、それらの API もネイティブに扱えます。承認ゲート付きツール、OS サンドボックス、そして全ターンを巻き戻せる `/restore`。
 
 [English README](README.md) · [简体中文 README](README.zh-CN.md) · [Tiếng Việt README](README.vi.md) · [codewhale.net](https://codewhale.net/) · [Install guide](docs/INSTALL.md) · [Provider registry](docs/PROVIDERS.md) · [Changelog](CHANGELOG.md)
 
@@ -92,9 +92,9 @@ codewhale exec --allowed-tools read_file,exec_shell --max-turns 10 "fix the fail
 
 ### あらゆるモデル、まずはオープンモデル
 
-24 のプロバイダが、同じハーネス、同じ Constitution、同じツール群を通ります:
+25 のプロバイダが、同じハーネス、同じ Constitution、同じツール群を通ります:
 
-- **オープンモデル（ホスト型）:** `deepseek`（同格の中の筆頭）、`openrouter`、`huggingface`（Inference Providers）、`moonshot`（Kimi）、`volcengine`（Ark）、`nvidia-nim`、`together`、`fireworks`、`novita`、`siliconflow` / `siliconflow-CN`、`arcee`、`xiaomi-mimo`、`atlascloud`、`wanjie-ark`、さらに任意のゲートウェイに使える汎用の `openai` 互換ルート。
+- **オープンモデル（ホスト型）:** `deepseek`（同格の中の筆頭）、`openrouter`、`huggingface`（Inference Providers）、`moonshot`（Kimi）、`volcengine`（Ark）、`nvidia-nim`、`together`、`fireworks`、`novita`、`siliconflow` / `siliconflow-CN`、`arcee`、`xiaomi-mimo`、`deepinfra`、`atlascloud`、`wanjie-ark`、さらに任意のゲートウェイに使える汎用の `openai` 互換ルート。
 - **オープンモデル（セルフホスト型）:** `vllm`、`sglang`、`ollama` を自分の localhost エンドポイントに向けて使えます — キーは不要です。
 - **クローズドプロバイダ（ネイティブ対応）:** `anthropic` は専用の `/v1/messages` アダプタ *(0.8.58)* 経由で、適応的 thinking、プロンプトキャッシュのブレークポイント、署名付き thinking のリプレイに対応します — OpenAI 方言のシムではありません。`openai-codex` は既存の ChatGPT/Codex CLI ログインを再利用します。
 

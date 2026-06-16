@@ -147,6 +147,9 @@ pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
 pub const DEFAULT_HUGGINGFACE_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
 pub const DEFAULT_HUGGINGFACE_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
 pub const DEFAULT_HUGGINGFACE_BASE_URL: &str = "https://router.huggingface.co/v1";
+pub const DEFAULT_DEEPINFRA_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
+pub const DEFAULT_DEEPINFRA_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
+pub const DEFAULT_DEEPINFRA_BASE_URL: &str = "https://api.deepinfra.com/v1/openai";
 pub const DEFAULT_TOGETHER_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
 pub const DEFAULT_TOGETHER_BASE_URL: &str = "https://api.together.xyz/v1";
 pub const DEFAULT_OPENAI_CODEX_MODEL: &str = "gpt-5.5";
@@ -216,6 +219,7 @@ pub enum ApiProvider {
     Zai,
     Stepfun,
     Minimax,
+    Deepinfra,
 }
 
 impl ApiProvider {
@@ -273,7 +277,7 @@ impl ApiProvider {
 
     /// `ApiProvider` discriminant → `ProviderKind` lookup.
     /// Index 1 is `None` for the legacy `DeepseekCN` variant.
-    const KIND_LOOKUP: [Option<codewhale_config::ProviderKind>; 25] = [
+    const KIND_LOOKUP: [Option<codewhale_config::ProviderKind>; 26] = [
         Some(codewhale_config::ProviderKind::Deepseek),
         None, // DeepseekCN
         Some(codewhale_config::ProviderKind::NvidiaNim),
@@ -299,10 +303,11 @@ impl ApiProvider {
         Some(codewhale_config::ProviderKind::Zai),
         Some(codewhale_config::ProviderKind::Stepfun),
         Some(codewhale_config::ProviderKind::Minimax),
+        Some(codewhale_config::ProviderKind::Deepinfra),
     ];
 
     /// `ProviderKind` discriminant → `ApiProvider` lookup.
-    const FROM_KIND_LOOKUP: [Self; 24] = [
+    const FROM_KIND_LOOKUP: [Self; 25] = [
         Self::Deepseek,
         Self::NvidiaNim,
         Self::Openai,
@@ -327,6 +332,7 @@ impl ApiProvider {
         Self::Zai,
         Self::Stepfun,
         Self::Minimax,
+        Self::Deepinfra,
     ];
 
     /// Map to the config-level `ProviderKind`.
@@ -1031,6 +1037,7 @@ pub fn model_completion_names_for_provider(provider: ApiProvider) -> Vec<&'stati
         ApiProvider::Huggingface => {
             vec![DEFAULT_HUGGINGFACE_MODEL, DEFAULT_HUGGINGFACE_FLASH_MODEL]
         }
+        ApiProvider::Deepinfra => vec![DEFAULT_DEEPINFRA_MODEL, DEFAULT_DEEPINFRA_FLASH_MODEL],
         ApiProvider::WanjieArk => vec![DEFAULT_WANJIE_ARK_MODEL],
         ApiProvider::Sglang => vec![DEFAULT_SGLANG_MODEL, DEFAULT_SGLANG_FLASH_MODEL],
         ApiProvider::Vllm => vec![DEFAULT_VLLM_MODEL, DEFAULT_VLLM_FLASH_MODEL],
@@ -2215,6 +2222,8 @@ pub struct ProvidersConfig {
     pub ollama: ProviderConfig,
     #[serde(default, alias = "hugging-face", alias = "hf")]
     pub huggingface: ProviderConfig,
+    #[serde(default, alias = "deep-infra", alias = "deep_infra")]
+    pub deepinfra: ProviderConfig,
     #[serde(default, alias = "together-ai")]
     pub together: ProviderConfig,
     #[serde(
@@ -2396,6 +2405,7 @@ impl Config {
             ApiProvider::Ollama => "providers.ollama",
             ApiProvider::Volcengine => "providers.volcengine",
             ApiProvider::Huggingface => "providers.huggingface",
+            ApiProvider::Deepinfra => "providers.deepinfra",
             ApiProvider::NvidiaNim => "providers.nvidia_nim",
             ApiProvider::Together => "providers.together",
             ApiProvider::OpenaiCodex => "providers.openai_codex",
@@ -2527,6 +2537,7 @@ impl Config {
             ApiProvider::Ollama => &providers.ollama,
             ApiProvider::Volcengine => &providers.volcengine,
             ApiProvider::Huggingface => &providers.huggingface,
+            ApiProvider::Deepinfra => &providers.deepinfra,
             ApiProvider::Together => &providers.together,
             ApiProvider::OpenaiCodex => &providers.openai_codex,
             ApiProvider::Anthropic => &providers.anthropic,
@@ -2558,6 +2569,7 @@ impl Config {
             ApiProvider::Ollama => &mut providers.ollama,
             ApiProvider::Volcengine => &mut providers.volcengine,
             ApiProvider::Huggingface => &mut providers.huggingface,
+            ApiProvider::Deepinfra => &mut providers.deepinfra,
             ApiProvider::Together => &mut providers.together,
             ApiProvider::OpenaiCodex => &mut providers.openai_codex,
             ApiProvider::Anthropic => &mut providers.anthropic,
@@ -2704,6 +2716,7 @@ impl Config {
             ApiProvider::Ollama => DEFAULT_OLLAMA_MODEL,
             ApiProvider::Volcengine => DEFAULT_VOLCENGINE_MODEL,
             ApiProvider::Huggingface => DEFAULT_HUGGINGFACE_MODEL,
+            ApiProvider::Deepinfra => DEFAULT_DEEPINFRA_MODEL,
             ApiProvider::Together => DEFAULT_TOGETHER_MODEL,
             ApiProvider::OpenaiCodex => DEFAULT_OPENAI_CODEX_MODEL,
             ApiProvider::Zai => DEFAULT_ZAI_MODEL,
@@ -2748,6 +2761,7 @@ impl Config {
             | ApiProvider::Ollama
             | ApiProvider::Volcengine
             | ApiProvider::Huggingface
+            | ApiProvider::Deepinfra
             | ApiProvider::Together
             | ApiProvider::OpenaiCodex
             | ApiProvider::Zai
@@ -2799,6 +2813,7 @@ impl Config {
                         ApiProvider::Ollama => DEFAULT_OLLAMA_BASE_URL,
                         ApiProvider::Volcengine => DEFAULT_VOLCENGINE_BASE_URL,
                         ApiProvider::Huggingface => DEFAULT_HUGGINGFACE_BASE_URL,
+                        ApiProvider::Deepinfra => DEFAULT_DEEPINFRA_BASE_URL,
                         ApiProvider::Together => DEFAULT_TOGETHER_BASE_URL,
                         ApiProvider::OpenaiCodex => DEFAULT_OPENAI_CODEX_BASE_URL,
                         ApiProvider::Zai => DEFAULT_ZAI_BASE_URL,
@@ -2852,6 +2867,7 @@ impl Config {
             ApiProvider::Ollama => "ollama",
             ApiProvider::Volcengine => "volcengine",
             ApiProvider::Huggingface => "huggingface",
+            ApiProvider::Deepinfra => "deepinfra",
             ApiProvider::Together => "together",
             ApiProvider::OpenaiCodex => "openai_codex",
             ApiProvider::Zai => "zai",
@@ -3017,6 +3033,10 @@ impl Config {
             ApiProvider::Huggingface => anyhow::bail!(
                 "Hugging Face API key not found. Run 'codewhale auth set --provider huggingface', \
                  set HUGGINGFACE_API_KEY or HF_TOKEN, or add [providers.huggingface] api_key in ~/.codewhale/config.toml."
+            ),
+            ApiProvider::Deepinfra => anyhow::bail!(
+                "DeepInfra API key not found. Run 'codewhale auth set --provider deepinfra', \
+                 set DEEPINFRA_API_KEY or DEEPINFRA_TOKEN, or add [providers.deepinfra] api_key in ~/.codewhale/config.toml."
             ),
             ApiProvider::Moonshot => anyhow::bail!(
                 "Moonshot/Kimi API key not found. Run 'codewhale auth set --provider moonshot', \
@@ -3418,6 +3438,7 @@ fn root_deepseek_model_is_foreign_to_direct_provider(provider: ApiProvider, mode
             | ApiProvider::Fireworks
             | ApiProvider::Siliconflow
             | ApiProvider::SiliconflowCn
+            | ApiProvider::Deepinfra
             | ApiProvider::Sglang
             | ApiProvider::Vllm
             | ApiProvider::Volcengine
@@ -3933,6 +3954,13 @@ fn apply_env_overrides(config: &mut Config) {
                     .huggingface
                     .base_url = Some(value);
             }
+            ApiProvider::Deepinfra => {
+                config
+                    .providers
+                    .get_or_insert_with(ProvidersConfig::default)
+                    .deepinfra
+                    .base_url = Some(value);
+            }
             ApiProvider::Together => {
                 config
                     .providers
@@ -4172,6 +4200,7 @@ fn apply_env_overrides(config: &mut Config) {
             ApiProvider::Ollama => &mut providers.ollama,
             ApiProvider::Volcengine => &mut providers.volcengine,
             ApiProvider::Huggingface => &mut providers.huggingface,
+            ApiProvider::Deepinfra => &mut providers.deepinfra,
             ApiProvider::Together => &mut providers.together,
             ApiProvider::OpenaiCodex => &mut providers.openai_codex,
             ApiProvider::Anthropic => &mut providers.anthropic,
@@ -4370,6 +4399,7 @@ fn apply_env_overrides(config: &mut Config) {
                 ApiProvider::Ollama => &mut providers.ollama,
                 ApiProvider::Volcengine => &mut providers.volcengine,
                 ApiProvider::Huggingface => &mut providers.huggingface,
+                ApiProvider::Deepinfra => &mut providers.deepinfra,
                 ApiProvider::Together => &mut providers.together,
                 ApiProvider::OpenaiCodex => &mut providers.openai_codex,
                 ApiProvider::Anthropic => &mut providers.anthropic,
@@ -4543,6 +4573,12 @@ fn normalize_model_config(config: &mut Config) {
         {
             providers.vllm.model = Some(normalized);
         }
+        if let Some(model) = providers.deepinfra.model.as_deref()
+            && !provider_entry_uses_custom_base_url(ApiProvider::Deepinfra, &providers.deepinfra)
+            && let Some(normalized) = normalize_model_for_provider(ApiProvider::Deepinfra, model)
+        {
+            providers.deepinfra.model = Some(normalized);
+        }
     }
 }
 
@@ -4600,6 +4636,7 @@ fn default_base_url_for_provider(provider: ApiProvider) -> &'static str {
         ApiProvider::Ollama => DEFAULT_OLLAMA_BASE_URL,
         ApiProvider::Volcengine => DEFAULT_VOLCENGINE_BASE_URL,
         ApiProvider::Huggingface => DEFAULT_HUGGINGFACE_BASE_URL,
+        ApiProvider::Deepinfra => DEFAULT_DEEPINFRA_BASE_URL,
         ApiProvider::Together => DEFAULT_TOGETHER_BASE_URL,
         ApiProvider::OpenaiCodex => DEFAULT_OPENAI_CODEX_BASE_URL,
         ApiProvider::Zai => DEFAULT_ZAI_BASE_URL,
@@ -4839,6 +4876,12 @@ fn model_for_provider(provider: ApiProvider, normalized: String) -> String {
         (ApiProvider::Sglang, "deepseek-v4-flash") => DEFAULT_SGLANG_FLASH_MODEL.to_string(),
         (ApiProvider::Vllm, "deepseek-v4-pro") => DEFAULT_VLLM_MODEL.to_string(),
         (ApiProvider::Vllm, "deepseek-v4-flash") => DEFAULT_VLLM_FLASH_MODEL.to_string(),
+        (ApiProvider::Deepinfra, "deepseek-v4-pro" | "deepseek-v4pro") => {
+            DEFAULT_DEEPINFRA_MODEL.to_string()
+        }
+        (ApiProvider::Deepinfra, "deepseek-v4-flash" | "deepseek-chat" | "deepseek-reasoner") => {
+            DEFAULT_DEEPINFRA_FLASH_MODEL.to_string()
+        }
         (
             ApiProvider::Moonshot,
             "kimi"
@@ -5049,6 +5092,7 @@ fn merge_providers(
             ollama: merge_provider_config(base.ollama, override_cfg.ollama),
             volcengine: merge_provider_config(base.volcengine, override_cfg.volcengine),
             huggingface: merge_provider_config(base.huggingface, override_cfg.huggingface),
+            deepinfra: merge_provider_config(base.deepinfra, override_cfg.deepinfra),
             together: merge_provider_config(base.together, override_cfg.together),
             openai_codex: merge_provider_config(base.openai_codex, override_cfg.openai_codex),
             zai: merge_provider_config(base.zai, override_cfg.zai),
@@ -5541,6 +5585,10 @@ pub fn active_provider_has_env_api_key(config: &Config) -> bool {
             std::env::var("HUGGINGFACE_API_KEY").is_ok_and(|k| !k.trim().is_empty())
                 || std::env::var("HF_TOKEN").is_ok_and(|k| !k.trim().is_empty())
         }
+        ApiProvider::Deepinfra => {
+            std::env::var("DEEPINFRA_API_KEY").is_ok_and(|k| !k.trim().is_empty())
+                || std::env::var("DEEPINFRA_TOKEN").is_ok_and(|k| !k.trim().is_empty())
+        }
         ApiProvider::Moonshot => {
             std::env::var("MOONSHOT_API_KEY").is_ok_and(|k| !k.trim().is_empty())
                 || std::env::var("KIMI_API_KEY").is_ok_and(|k| !k.trim().is_empty())
@@ -5598,6 +5646,7 @@ pub fn has_api_key_for(config: &Config, provider: ApiProvider) -> bool {
         ApiProvider::Siliconflow | ApiProvider::SiliconflowCn => "SILICONFLOW_API_KEY",
         ApiProvider::Arcee => "ARCEE_API_KEY",
         ApiProvider::Huggingface => "HUGGINGFACE_API_KEY",
+        ApiProvider::Deepinfra => "DEEPINFRA_API_KEY",
         ApiProvider::Together => "TOGETHER_API_KEY",
         ApiProvider::OpenaiCodex => "OPENAI_CODEX_ACCESS_TOKEN",
         ApiProvider::Moonshot => "MOONSHOT_API_KEY",
@@ -5658,6 +5707,11 @@ pub fn has_api_key_for(config: &Config, provider: ApiProvider) -> bool {
     }
     if matches!(provider, ApiProvider::Huggingface)
         && std::env::var("HF_TOKEN").is_ok_and(|k| !k.trim().is_empty())
+    {
+        return true;
+    }
+    if matches!(provider, ApiProvider::Deepinfra)
+        && std::env::var("DEEPINFRA_TOKEN").is_ok_and(|k| !k.trim().is_empty())
     {
         return true;
     }
@@ -5728,6 +5782,7 @@ pub fn save_api_key_for(provider: ApiProvider, api_key: &str) -> Result<PathBuf>
         ApiProvider::SiliconflowCn => "providers.siliconflow_cn",
         ApiProvider::Arcee => "providers.arcee",
         ApiProvider::Huggingface => "providers.huggingface",
+        ApiProvider::Deepinfra => "providers.deepinfra",
         ApiProvider::Moonshot => "providers.moonshot",
         ApiProvider::Sglang => "providers.sglang",
         ApiProvider::Vllm => "providers.vllm",
@@ -5777,6 +5832,7 @@ pub fn save_api_key_for(provider: ApiProvider, api_key: &str) -> Result<PathBuf>
         ApiProvider::SiliconflowCn => "siliconflow_cn",
         ApiProvider::Arcee => "arcee",
         ApiProvider::Huggingface => "huggingface",
+        ApiProvider::Deepinfra => "deepinfra",
         ApiProvider::Moonshot => "moonshot",
         ApiProvider::Sglang => "sglang",
         ApiProvider::Vllm => "vllm",
@@ -5879,6 +5935,7 @@ fn provider_config_key(provider: ApiProvider) -> Result<&'static str> {
         ApiProvider::SiliconflowCn => Ok("siliconflow_cn"),
         ApiProvider::Arcee => Ok("arcee"),
         ApiProvider::Huggingface => Ok("huggingface"),
+        ApiProvider::Deepinfra => Ok("deepinfra"),
         ApiProvider::Moonshot => Ok("moonshot"),
         ApiProvider::Sglang => Ok("sglang"),
         ApiProvider::Vllm => Ok("vllm"),

@@ -2,9 +2,9 @@
 
 > 面向任意模型的终端编程智能体——开放模型优先。
 
-一套 Rust TUI 与 CLI，支持 24 个 provider。DeepSeek、OpenRouter、Hugging Face
-以及本地 vLLM/SGLang/Ollama 都是一等路由；当你手里是 Anthropic Claude 或
-OpenAI 的 key 时，CodeWhale 也以原生协议直连。工具经审批放行、操作系统级沙箱，
+一套 Rust TUI 与 CLI，支持 25 个 provider。DeepSeek、OpenRouter、Hugging Face、
+DeepInfra 以及本地 vLLM/SGLang/Ollama 都是一等路由；当你手里是 Anthropic Claude
+或 OpenAI 的 key 时，CodeWhale 也以原生协议直连。工具经审批放行、操作系统级沙箱，
 每一轮都可用 `/restore` 回滚。
 
 [English README](README.md) · [日本語 README](README.ja-JP.md) · [Tiếng Việt README](README.vi.md) · [codewhale.net](https://codewhale.net/) · [安装指南](docs/INSTALL.md) · [Provider 注册表](docs/PROVIDERS.md) · [更新日志](CHANGELOG.md)
@@ -116,13 +116,13 @@ codewhale exec --allowed-tools read_file,exec_shell --max-turns 10 "fix the fail
 
 ### 任意模型，开放模型优先
 
-24 个 provider 共用同一套运行框架、同一部宪法、同一组工具：
+25 个 provider 共用同一套运行框架、同一部宪法、同一组工具：
 
 - **开放模型，托管服务：** `deepseek`（同侪之首）、`openrouter`、
   `huggingface`（Inference Providers）、`moonshot`（Kimi）、`volcengine`
   （火山方舟）、`nvidia-nim`、`together`、`fireworks`、`novita`、
   `siliconflow` / `siliconflow-CN`、`arcee`、`xiaomi-mimo`、`atlascloud`、
-  `wanjie-ark`，外加一条通用的 `openai` 兼容路由，可接任意网关。
+  `deepinfra`、`wanjie-ark`，外加一条通用的 `openai` 兼容路由，可接任意网关。
 - **开放模型，自托管：** `vllm`、`sglang`、`ollama` 直连你自己的 localhost
   端点——无需任何 key。
 - **闭源 provider，原生直连：** `anthropic` 走专用的 `/v1/messages` 适配器
