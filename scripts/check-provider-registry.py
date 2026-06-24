@@ -25,6 +25,9 @@ CONFIG_RS = ROOT / "crates" / "config" / "src" / "lib.rs"
 PROVIDER_KIND_RS = ROOT / "crates" / "config" / "src" / "provider_kind.rs"
 PROVIDER_RS = ROOT / "crates" / "config" / "src" / "provider.rs"
 TUI_CONFIG_RS = ROOT / "crates" / "tui" / "src" / "config.rs"
+# Default provider model/base-URL constants were split out of config.rs into
+# this leaf module (#3311); read them from there for the default-string check.
+TUI_CONFIG_MODELS_RS = ROOT / "crates" / "tui" / "src" / "config" / "models.rs"
 AGENT_RS = ROOT / "crates" / "agent" / "src" / "lib.rs"
 PROVIDERS_MD = ROOT / "docs" / "PROVIDERS.md"
 
@@ -201,10 +204,13 @@ def model_registry_providers(agent_rs: str, variant_to_id: dict[str, str]) -> se
 
 
 def default_strings(tui_config_rs: str) -> set[str]:
+    # Model/base-URL constants now live in config/models.rs (#3311); scan it
+    # alongside config.rs so the check follows the leaf split.
+    sources = tui_config_rs + "\n" + read(TUI_CONFIG_MODELS_RS)
     defaults = set()
     for name, value in re.findall(
         r'const\s+(DEFAULT_[A-Z0-9_]+(?:MODEL|BASE_URL)):\s*&str\s*=\s*"([^"]+)"',
-        tui_config_rs,
+        sources,
     ):
         if name == "DEFAULT_DEEPSEEKCN_BASE_URL":
             continue

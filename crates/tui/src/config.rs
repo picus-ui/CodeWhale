@@ -19,217 +19,22 @@ use crate::audit::log_sensitive_event;
 use crate::features::{Feature, Features, FeaturesToml, is_known_feature_key};
 use crate::hooks::HooksConfig;
 
-pub const DEFAULT_MAX_SUBAGENTS: usize = 20;
-pub const MAX_SUBAGENTS: usize = 20;
-/// Upper bound for queued + running sub-agent admissions. This is deliberately
-/// higher than the instantaneous concurrency cap so Workflow-style fanout can
-/// opt into large bounded populations without unbounded queue growth.
-pub const MAX_SUBAGENT_ADMISSION: usize = 200;
-/// Default per-step DeepSeek API timeout for sub-agent requests, in seconds.
-/// Matches the legacy hardcoded value so existing configs keep their old
-/// behavior when `[subagents] api_timeout_secs` is unset (#1806, #1808).
-pub const DEFAULT_SUBAGENT_API_TIMEOUT_SECS: u64 = 120;
-/// Minimum accepted `[subagents] api_timeout_secs`. Anything lower (including
-/// `0`, which would otherwise produce an immediate timeout footgun) clamps
-/// up to this value before the runtime sees it.
-pub const MIN_SUBAGENT_API_TIMEOUT_SECS: u64 = 1;
-/// Maximum accepted `[subagents] api_timeout_secs` (30 minutes). The cap
-/// keeps a misconfigured per-step timeout from masking real model/network
-/// hangs forever.
-pub const MAX_SUBAGENT_API_TIMEOUT_SECS: u64 = 1800;
-/// Default wall-clock interval without manager-visible sub-agent progress
-/// before a running child can be auto-cancelled to release its slot (#2614).
-pub const DEFAULT_SUBAGENT_HEARTBEAT_TIMEOUT_SECS: u64 = 300;
-/// Minimum accepted `[subagents] heartbeat_timeout_secs`.
-pub const MIN_SUBAGENT_HEARTBEAT_TIMEOUT_SECS: u64 = 30;
-/// Maximum accepted `[subagents] heartbeat_timeout_secs` (1 hour).
-pub const MAX_SUBAGENT_HEARTBEAT_TIMEOUT_SECS: u64 = 3600;
-/// Default per-SSE-chunk idle timeout, in seconds.
-pub const DEFAULT_STREAM_CHUNK_TIMEOUT_SECS: u64 = 300;
-/// Minimum accepted stream chunk timeout.
-pub const MIN_STREAM_CHUNK_TIMEOUT_SECS: u64 = 1;
-/// Maximum accepted stream chunk timeout.
-pub const MAX_STREAM_CHUNK_TIMEOUT_SECS: u64 = 3600;
-pub(crate) const STREAM_CHUNK_TIMEOUT_ENV: &str = "DEEPSEEK_STREAM_IDLE_TIMEOUT_SECS";
+// Sub-agent concurrency/timeout limit constants and their clamp resolvers live
+// in the `subagent_limits` leaf module. The constants are re-exported (keeping
+// each item's visibility) so `crate::config::<CONST>` paths resolve unchanged;
+// the private resolvers are pulled back in without widening external surface
+// (#3311).
+mod subagent_limits;
+pub use subagent_limits::*;
+use subagent_limits::{resolve_subagent_api_timeout_secs, resolve_subagent_heartbeat_timeout_secs};
 
-fn resolve_subagent_api_timeout_secs(raw: Option<u64>) -> u64 {
-    let raw = raw.unwrap_or(DEFAULT_SUBAGENT_API_TIMEOUT_SECS);
-    if raw == 0 {
-        return DEFAULT_SUBAGENT_API_TIMEOUT_SECS;
-    }
-    raw.clamp(MIN_SUBAGENT_API_TIMEOUT_SECS, MAX_SUBAGENT_API_TIMEOUT_SECS)
-}
+// Provider model-name and base-URL constants live in the `models` leaf module
+// and are re-exported below so every `crate::config::<CONST>` path is unchanged
+// (#3311).
+mod models;
+pub use models::*;
 
-fn resolve_subagent_heartbeat_timeout_secs(raw: Option<u64>, api_timeout_secs: u64) -> u64 {
-    let raw = raw.unwrap_or(DEFAULT_SUBAGENT_HEARTBEAT_TIMEOUT_SECS);
-    let configured = if raw == 0 {
-        DEFAULT_SUBAGENT_HEARTBEAT_TIMEOUT_SECS
-    } else {
-        raw.clamp(
-            MIN_SUBAGENT_HEARTBEAT_TIMEOUT_SECS,
-            MAX_SUBAGENT_HEARTBEAT_TIMEOUT_SECS,
-        )
-    };
-    let min_for_api = api_timeout_secs.saturating_add(30).clamp(
-        MIN_SUBAGENT_HEARTBEAT_TIMEOUT_SECS,
-        MAX_SUBAGENT_HEARTBEAT_TIMEOUT_SECS,
-    );
-    configured.max(min_for_api)
-}
-
-pub const DEFAULT_TEXT_MODEL: &str = "deepseek-v4-pro";
-pub const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/beta";
-pub const DEFAULT_DEEPSEEK_ANTHROPIC_MODEL: &str = DEFAULT_TEXT_MODEL;
-pub const DEFAULT_DEEPSEEK_ANTHROPIC_BASE_URL: &str = "https://api.deepseek.com/anthropic";
-pub const DEFAULT_NVIDIA_NIM_MODEL: &str = "deepseek-ai/deepseek-v4-pro";
-pub const DEFAULT_NVIDIA_NIM_FLASH_MODEL: &str = "deepseek-ai/deepseek-v4-flash";
-pub const DEFAULT_NVIDIA_NIM_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
-pub const DEFAULT_OPENAI_MODEL: &str = "deepseek-v4-pro";
-pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-pub const DEFAULT_ATLASCLOUD_MODEL: &str = "deepseek-ai/deepseek-v4-flash";
-pub const DEFAULT_ATLASCLOUD_BASE_URL: &str = "https://api.atlascloud.ai/v1";
-pub const DEFAULT_WANJIE_ARK_MODEL: &str = "deepseek-reasoner";
-pub const DEFAULT_VOLCENGINE_MODEL: &str = "DeepSeek-V4-Pro";
-pub const DEFAULT_VOLCENGINE_FLASH_MODEL: &str = "DeepSeek-V4-Flash";
-pub const DEFAULT_VOLCENGINE_BASE_URL: &str = "https://ark.cn-beijing.volces.com/api/coding/v3";
-pub const DEFAULT_WANJIE_ARK_BASE_URL: &str = "https://maas-openapi.wanjiedata.com/api/v1";
-pub const DEFAULT_OPENROUTER_MODEL: &str = "deepseek/deepseek-v4-pro";
-pub const DEFAULT_OPENROUTER_FLASH_MODEL: &str = "deepseek/deepseek-v4-flash";
-pub const OPENROUTER_ARCEE_TRINITY_LARGE_THINKING_MODEL: &str = "arcee-ai/trinity-large-thinking";
-pub const OPENROUTER_GEMMA_4_31B_MODEL: &str = "google/gemma-4-31b-it";
-pub const OPENROUTER_GEMMA_4_26B_A4B_MODEL: &str = "google/gemma-4-26b-a4b-it";
-pub const OPENROUTER_GLM_5_1_MODEL: &str = "z-ai/glm-5.1";
-pub const OPENROUTER_GLM_5_2_MODEL: &str = "z-ai/glm-5.2";
-pub const OPENROUTER_GLM_5_TURBO_MODEL: &str = "z-ai/glm-5-turbo";
-pub const OPENROUTER_KIMI_K2_7_CODE_MODEL: &str = "moonshotai/kimi-k2.7-code";
-pub const OPENROUTER_KIMI_K2_6_MODEL: &str = "moonshotai/kimi-k2.6";
-pub const OPENROUTER_MINIMAX_M3_MODEL: &str = "minimax/minimax-m3";
-pub const OPENROUTER_NEMOTRON_3_NANO_OMNI_MODEL: &str =
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
-pub const OPENROUTER_QWEN_3_6_FLASH_MODEL: &str = "qwen/qwen3.6-flash";
-pub const OPENROUTER_QWEN_3_6_35B_A3B_MODEL: &str = "qwen/qwen3.6-35b-a3b";
-pub const OPENROUTER_QWEN_3_6_MAX_PREVIEW_MODEL: &str = "qwen/qwen3.6-max-preview";
-pub const OPENROUTER_QWEN_3_6_27B_MODEL: &str = "qwen/qwen3.6-27b";
-pub const OPENROUTER_QWEN_3_6_PLUS_MODEL: &str = "qwen/qwen3.6-plus";
-pub const OPENROUTER_QWEN_3_7_MAX_MODEL: &str = "qwen/qwen3.7-max";
-pub const OPENROUTER_MINIMAX_2_7_MODEL: &str = "minimax/minimax-2.7";
-pub const OPENROUTER_NEMOTRON_3_ULTRA_MODEL: &str = "nvidia/nemotron-3-ultra-550b-a55b";
-pub const OPENROUTER_TENCENT_HY3_PREVIEW_MODEL: &str = "tencent/hy3-preview";
-pub const OPENROUTER_XIAOMI_MIMO_V2_5_PRO_MODEL: &str = "xiaomi/mimo-v2.5-pro";
-pub const OPENROUTER_XIAOMI_MIMO_V2_5_MODEL: &str = "xiaomi/mimo-v2.5";
-pub const RECENT_OPENROUTER_LARGE_MODELS: &[&str] = &[
-    OPENROUTER_ARCEE_TRINITY_LARGE_THINKING_MODEL,
-    OPENROUTER_MINIMAX_M3_MODEL,
-    OPENROUTER_XIAOMI_MIMO_V2_5_PRO_MODEL,
-    OPENROUTER_XIAOMI_MIMO_V2_5_MODEL,
-    OPENROUTER_QWEN_3_6_FLASH_MODEL,
-    OPENROUTER_QWEN_3_6_35B_A3B_MODEL,
-    OPENROUTER_QWEN_3_6_MAX_PREVIEW_MODEL,
-    OPENROUTER_QWEN_3_6_27B_MODEL,
-    OPENROUTER_QWEN_3_6_PLUS_MODEL,
-    OPENROUTER_QWEN_3_7_MAX_MODEL,
-    OPENROUTER_MINIMAX_2_7_MODEL,
-    OPENROUTER_NEMOTRON_3_ULTRA_MODEL,
-    OPENROUTER_KIMI_K2_7_CODE_MODEL,
-    OPENROUTER_KIMI_K2_6_MODEL,
-    OPENROUTER_GLM_5_1_MODEL,
-    OPENROUTER_GLM_5_2_MODEL,
-    OPENROUTER_TENCENT_HY3_PREVIEW_MODEL,
-    OPENROUTER_GEMMA_4_31B_MODEL,
-    OPENROUTER_GEMMA_4_26B_A4B_MODEL,
-    OPENROUTER_NEMOTRON_3_NANO_OMNI_MODEL,
-];
-pub const DEFAULT_OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
-pub const DEFAULT_XIAOMI_MIMO_MODEL: &str = "mimo-v2.5-pro";
-pub const XIAOMI_MIMO_V2_5_PRO_ULTRASPEED_MODEL: &str = "mimo-v2.5-pro-ultraspeed";
-pub const XIAOMI_MIMO_PAY_AS_YOU_GO_BASE_URL: &str = "https://api.xiaomimimo.com/v1";
-pub const DEFAULT_XIAOMI_MIMO_BASE_URL: &str = "https://token-plan-sgp.xiaomimimo.com/v1";
-pub const XIAOMI_MIMO_TOKEN_PLAN_CN_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1";
-pub const XIAOMI_MIMO_TOKEN_PLAN_SGP_BASE_URL: &str = DEFAULT_XIAOMI_MIMO_BASE_URL;
-pub const XIAOMI_MIMO_TOKEN_PLAN_AMS_BASE_URL: &str = "https://token-plan-ams.xiaomimimo.com/v1";
-pub const XIAOMI_MIMO_V2_5_OMNI_MODEL: &str = "mimo-v2.5";
-pub const XIAOMI_MIMO_ASR_MODEL: &str = "mimo-v2.5-asr";
-pub const XIAOMI_MIMO_TTS_MODEL: &str = "mimo-v2.5-tts";
-pub const XIAOMI_MIMO_TTS_VOICE_DESIGN_MODEL: &str = "mimo-v2.5-tts-voicedesign";
-pub const XIAOMI_MIMO_TTS_VOICE_CLONE_MODEL: &str = "mimo-v2.5-tts-voiceclone";
-pub const XIAOMI_MIMO_V2_TTS_MODEL: &str = "mimo-v2-tts";
-pub const DEFAULT_NOVITA_MODEL: &str = "deepseek/deepseek-v4-pro";
-pub const DEFAULT_NOVITA_FLASH_MODEL: &str = "deepseek/deepseek-v4-flash";
-pub const DEFAULT_NOVITA_BASE_URL: &str = "https://api.novita.ai/openai/v1";
-pub const DEFAULT_FIREWORKS_MODEL: &str = "accounts/fireworks/models/deepseek-v4-pro";
-pub const DEFAULT_FIREWORKS_BASE_URL: &str = "https://api.fireworks.ai/inference/v1";
-pub const DEFAULT_SILICONFLOW_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
-pub const DEFAULT_SILICONFLOW_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
-pub const DEFAULT_SILICONFLOW_BASE_URL: &str = "https://api.siliconflow.com/v1";
-pub const DEFAULT_SILICONFLOW_CN_BASE_URL: &str = "https://api.siliconflow.cn/v1";
-pub const DEFAULT_ARCEE_MODEL: &str = "trinity-large-thinking";
-pub const ARCEE_TRINITY_LARGE_PREVIEW_MODEL: &str = "trinity-large-preview";
-pub const ARCEE_TRINITY_MINI_MODEL: &str = "trinity-mini";
-pub const DEFAULT_ARCEE_BASE_URL: &str = "https://api.arcee.ai/api/v1";
-pub const DEFAULT_MOONSHOT_MODEL: &str = "kimi-k2.7-code";
-pub const MOONSHOT_KIMI_K2_6_MODEL: &str = "kimi-k2.6";
-pub const DEFAULT_MOONSHOT_BASE_URL: &str = "https://api.moonshot.ai/v1";
-pub const DEFAULT_KIMI_CODE_MODEL: &str = "kimi-for-coding";
-pub const DEFAULT_KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
-pub const DEFAULT_SGLANG_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
-pub const DEFAULT_SGLANG_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
-pub const DEFAULT_SGLANG_BASE_URL: &str = "http://localhost:30000/v1";
-pub const DEFAULT_VLLM_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
-pub const DEFAULT_VLLM_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
-pub const DEFAULT_VLLM_BASE_URL: &str = "http://localhost:8000/v1";
-pub const DEFAULT_OLLAMA_MODEL: &str = "deepseek-coder:1.3b";
-pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
-pub const DEFAULT_HUGGINGFACE_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
-pub const DEFAULT_HUGGINGFACE_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
-pub const DEFAULT_HUGGINGFACE_BASE_URL: &str = "https://router.huggingface.co/v1";
-pub const DEFAULT_DEEPINFRA_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
-pub const DEFAULT_DEEPINFRA_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
-pub const DEFAULT_DEEPINFRA_BASE_URL: &str = "https://api.deepinfra.com/v1/openai";
-pub const DEFAULT_TOGETHER_MODEL: &str = "deepseek-ai/DeepSeek-V4-Pro";
-pub const DEFAULT_TOGETHER_FLASH_MODEL: &str = "deepseek-ai/DeepSeek-V4-Flash";
-pub const DEFAULT_TOGETHER_BASE_URL: &str = "https://api.together.xyz/v1";
-pub const DEFAULT_QIANFAN_MODEL: &str = "ernie-4.0-turbo-8k";
-pub const DEFAULT_QIANFAN_BASE_URL: &str = "https://api.baiduqianfan.ai/v1";
-pub const DEFAULT_OPENAI_CODEX_MODEL: &str = "gpt-5.5";
-pub const DEFAULT_OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
-pub const OPENAI_CODEX_EFFECTIVE_CONTEXT_WINDOW_TOKENS: u32 = 400_000;
-/// Legacy `deepseek-cn` provider alias.
-///
-/// DeepSeek's official API host is the same worldwide. Keep this alias for
-/// old configs, but route it through the normal beta-enabled DeepSeek default.
-/// Legacy typo hostname `api.deepseeki.com` remains recognized in URL
-/// heuristics for backward compatibility.
-pub const DEFAULT_DEEPSEEKCN_BASE_URL: &str = DEFAULT_DEEPSEEK_BASE_URL;
 const API_KEYRING_SENTINEL: &str = "__KEYRING__";
-pub const COMMON_DEEPSEEK_MODELS: &[&str] = &[
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "deepseek-ai/deepseek-v4-pro",
-    "deepseek-ai/deepseek-v4-flash",
-    "deepseek/deepseek-v4-pro",
-    "deepseek/deepseek-v4-flash",
-];
-pub const OFFICIAL_DEEPSEEK_MODELS: &[&str] = &["deepseek-v4-pro", "deepseek-v4-flash"];
-pub const DEFAULT_ZAI_MODEL: &str = "GLM-5.2";
-pub const ZAI_GLM_5_1_MODEL: &str = "GLM-5.1";
-pub const ZAI_GLM_5_2_MODEL: &str = "GLM-5.2";
-pub const ZAI_GLM_5_TURBO_MODEL: &str = "GLM-5-Turbo";
-pub const DEFAULT_ZAI_BASE_URL: &str = "https://api.z.ai/api/coding/paas/v4";
-pub const DEFAULT_STEPFUN_MODEL: &str = "step-3.7-flash";
-pub const DEFAULT_STEPFUN_BASE_URL: &str = "https://api.stepfun.ai/v1";
-pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
-pub const ANTHROPIC_OPUS_MODEL: &str = "claude-opus-4-8";
-pub const ANTHROPIC_HAIKU_MODEL: &str = "claude-haiku-4-5";
-pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-pub const DEFAULT_MINIMAX_MODEL: &str = "MiniMax-M3";
-pub const MINIMAX_M2_7_MODEL: &str = "MiniMax-M2.7";
-pub const MINIMAX_M2_7_HIGHSPEED_MODEL: &str = "MiniMax-M2.7-highspeed";
-pub const MINIMAX_M2_5_MODEL: &str = "MiniMax-M2.5";
-pub const MINIMAX_M2_5_HIGHSPEED_MODEL: &str = "MiniMax-M2.5-highspeed";
-pub const MINIMAX_M2_1_MODEL: &str = "MiniMax-M2.1";
-pub const MINIMAX_M2_1_HIGHSPEED_MODEL: &str = "MiniMax-M2.1-highspeed";
-pub const MINIMAX_M2_MODEL: &str = "MiniMax-M2";
-pub const DEFAULT_MINIMAX_BASE_URL: &str = "https://api.minimax.io/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1545,132 +1350,11 @@ impl SnapshotsConfig {
     }
 }
 
-/// Search provider enumeration — selects which backend `web_search` uses.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchProvider {
-    /// Bing HTML scraping. No API key needed.
-    Bing,
-    /// DuckDuckGo HTML scraping with Bing fallback. No API key needed.
-    #[default]
-    #[serde(alias = "duckduckgo")]
-    DuckDuckGo,
-    /// Tavily AI Search API (<https://tavily.com>). Requires api_key.
-    Tavily,
-    /// Bocha AI Search API (<https://bochaai.com>). Requires api_key.
-    Bocha,
-    /// Metaso AI Search API (<https://metaso.cn>). Uses built-in default key
-    /// or `METASO_API_KEY` env var; configurable via `[search] api_key`.
-    #[serde(alias = "metaso")]
-    Metaso,
-    /// SearXNG JSON search API. Requires a trusted/self-hosted `base_url`.
-    #[serde(alias = "searx", alias = "searx-ng", alias = "searx_ng")]
-    Searxng,
-    /// Baidu AI Search API (<https://qianfan.baidubce.com>). Requires api_key.
-    #[serde(
-        alias = "baidu-search",
-        alias = "baidu_ai_search",
-        alias = "baidu_search",
-        alias = "baidu-ai-search"
-    )]
-    Baidu,
-    /// Volcengine Ark web_search via Responses API. Requires api_key.
-    /// Free tier: 20K queries/month per API key. Falls back to
-    /// `VOLCENGINE_API_KEY` / `VOLCENGINE_ARK_API_KEY` / `ARK_API_KEY`
-    /// env vars when `[search] api_key` is not set.
-    #[serde(
-        alias = "volcengine",
-        alias = "ark",
-        alias = "volc",
-        alias = "volcengine-ark",
-        alias = "volcengine_ark",
-        alias = "volc-ark"
-    )]
-    Volcengine,
-    /// Sofya web search API (<https://sofya.co>). Requires api_key
-    /// (`ay_live_...`). Returns full extracted page content rather than
-    /// snippets; falls back to the `SOFYA_API_KEY` env var when
-    /// `[search] api_key` is not set.
-    Sofya,
-}
-
-impl SearchProvider {
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "bing" => Some(Self::Bing),
-            "duckduckgo" | "duck-duck-go" | "duck_duck_go" | "ddg" => Some(Self::DuckDuckGo),
-            "tavily" => Some(Self::Tavily),
-            "bocha" => Some(Self::Bocha),
-            "metaso" => Some(Self::Metaso),
-            "searxng" | "searx" | "searx-ng" | "searx_ng" => Some(Self::Searxng),
-            "baidu" | "baidu-search" | "baidu_search" | "baidu-ai-search" | "baidu_ai_search" => {
-                Some(Self::Baidu)
-            }
-            "volcengine" | "ark" | "volc" | "volcengine-ark" => Some(Self::Volcengine),
-            "sofya" => Some(Self::Sofya),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Bing => "bing",
-            Self::DuckDuckGo => "duckduckgo",
-            Self::Tavily => "tavily",
-            Self::Bocha => "bocha",
-            Self::Metaso => "metaso",
-            Self::Searxng => "searxng",
-            Self::Baidu => "baidu",
-            Self::Volcengine => "volcengine",
-            Self::Sofya => "sofya",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchProviderSource {
-    Default,
-    Config,
-    EnvOverride,
-}
-
-impl SearchProviderSource {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Config => "config",
-            Self::EnvOverride => "env override",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SearchProviderResolution {
-    pub provider: SearchProvider,
-    pub source: SearchProviderSource,
-}
-
-/// Web search provider configuration (`[search]` table in config.toml).
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct SearchConfig {
-    /// Search provider: `bing` | `duckduckgo` | `tavily` | `bocha` | `metaso` | `searxng` | `baidu` | `volcengine`. Default: `duckduckgo`.
-    #[serde(default)]
-    pub provider: Option<SearchProvider>,
-    /// Optional search endpoint. With `duckduckgo`, this is a
-    /// DuckDuckGo-compatible HTML endpoint. With `searxng`, this is the trusted
-    /// SearXNG instance root or `/search` endpoint.
-    #[serde(default)]
-    pub base_url: Option<String>,
-    /// API key for Tavily, Bocha, Metaso, Baidu, or Volcengine. Not required for Bing, DuckDuckGo, or SearXNG.
-    /// Metaso also falls back to `METASO_API_KEY` env var, then a built-in default.
-    /// Baidu also falls back to `BAIDU_SEARCH_API_KEY` env var.
-    /// Volcengine also falls back to `VOLCENGINE_API_KEY` / `VOLCENGINE_ARK_API_KEY` / `ARK_API_KEY` env vars.
-    #[serde(default)]
-    pub api_key: Option<String>,
-}
+// Web-search `[search]` table types live in the `search` leaf module and are
+// re-exported below so `crate::config::SearchProvider` (and siblings) resolve
+// unchanged (#3311).
+mod search;
+pub use search::*;
 
 /// Model-visible tool catalog controls (`[tools]` table in config.toml).
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -4047,65 +3731,17 @@ fn root_deepseek_model_is_foreign_to_direct_provider(provider: ApiProvider, mode
 
 // === Defaults ===
 
-fn default_config_path() -> Option<PathBuf> {
-    env_config_path().or_else(home_config_path)
-}
-
-fn codewhale_home_dir() -> Option<PathBuf> {
-    std::env::var_os("CODEWHALE_HOME").and_then(|path| {
-        let path = PathBuf::from(path);
-        (!path.as_os_str().is_empty()).then_some(path)
-    })
-}
-
-pub(crate) fn effective_home_dir() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("HOME") {
-        let path = PathBuf::from(path);
-        if !path.as_os_str().is_empty() {
-            return Some(path);
-        }
-    }
-
-    if let Some(path) = std::env::var_os("USERPROFILE") {
-        let path = PathBuf::from(path);
-        if !path.as_os_str().is_empty() {
-            return Some(path);
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        if let (Some(drive), Some(homepath)) =
-            (std::env::var_os("HOMEDRIVE"), std::env::var_os("HOMEPATH"))
-        {
-            let mut path = PathBuf::from(drive);
-            path.push(homepath);
-            if !path.as_os_str().is_empty() {
-                return Some(path);
-            }
-        }
-    }
-
-    dirs::home_dir()
-}
-
-fn home_config_path() -> Option<PathBuf> {
-    if let Some(home) = codewhale_home_dir() {
-        return Some(home.join("config.toml"));
-    }
-
-    effective_home_dir().map(|home| {
-        let primary = home.join(".codewhale").join("config.toml");
-        if primary.exists() {
-            return primary;
-        }
-        let legacy = home.join(".deepseek").join("config.toml");
-        if legacy.exists() {
-            return legacy;
-        }
-        primary
-    })
-}
+// Pure filesystem path helpers live in the `paths` leaf module. The two
+// `pub(crate)` entry points are re-exported so external `crate::config::`
+// callers resolve unchanged; the remaining helpers are imported privately for
+// the workspace-trust/config-load logic that stays in this file (#3311).
+mod paths;
+use paths::{
+    canonicalize_or_keep, codewhale_home_dir, default_config_path, default_managed_config_path,
+    default_mcp_config_path, default_memory_path, default_notes_path, default_requirements_path,
+    default_skills_dir, env_config_path, expand_pathbuf, home_config_path, workspace_config_key,
+};
+pub(crate) use paths::{effective_home_dir, expand_path};
 
 pub(crate) fn workspace_trust_config_candidate_paths() -> Vec<PathBuf> {
     if let Some(path) = env_config_path() {
@@ -4192,39 +3828,6 @@ fn is_trusted_level(level: &str) -> bool {
     level.trim().eq_ignore_ascii_case("trusted")
 }
 
-fn workspace_config_key(workspace: &Path) -> String {
-    canonicalize_or_keep(workspace)
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn canonicalize_or_keep(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn env_config_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("CODEWHALE_CONFIG_PATH") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return Some(expand_path(trimmed));
-        }
-    }
-    if let Ok(path) = std::env::var("DEEPSEEK_CONFIG_PATH") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return Some(expand_path(trimmed));
-        }
-    }
-    None
-}
-
-fn expand_pathbuf(path: PathBuf) -> PathBuf {
-    if let Some(raw) = path.to_str() {
-        return expand_path(raw);
-    }
-    path
-}
-
 pub(crate) fn resolve_load_config_path(path: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(path) = path {
         return Some(expand_pathbuf(path));
@@ -4287,102 +3890,6 @@ check_for_updates = true
     write_config_file_secure(&config_path, &content)
         .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
     Ok(Some(config_path))
-}
-
-fn default_managed_config_path() -> Option<PathBuf> {
-    #[cfg(unix)]
-    {
-        Some(PathBuf::from("/etc/deepseek/managed_config.toml"))
-    }
-    #[cfg(not(unix))]
-    {
-        effective_home_dir().map(|home| {
-            let primary = home.join(".codewhale").join("managed_config.toml");
-            if primary.exists() {
-                return primary;
-            }
-            home.join(".deepseek").join("managed_config.toml")
-        })
-    }
-}
-
-fn default_requirements_path() -> Option<PathBuf> {
-    #[cfg(unix)]
-    {
-        Some(PathBuf::from("/etc/deepseek/requirements.toml"))
-    }
-    #[cfg(not(unix))]
-    {
-        effective_home_dir().map(|home| {
-            let primary = home.join(".codewhale").join("requirements.toml");
-            if primary.exists() {
-                return primary;
-            }
-            home.join(".deepseek").join("requirements.toml")
-        })
-    }
-}
-
-pub(crate) fn expand_path(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix('~')
-        && (stripped.is_empty() || stripped.starts_with('/') || stripped.starts_with('\\'))
-        && let Some(mut home) = effective_home_dir()
-    {
-        let suffix = stripped.trim_start_matches(['/', '\\']);
-        if !suffix.is_empty() {
-            home.push(suffix);
-        }
-        return home;
-    }
-
-    let expanded = shellexpand::tilde(path);
-    PathBuf::from(expanded.as_ref())
-}
-
-fn default_skills_dir() -> Option<PathBuf> {
-    effective_home_dir().map(|home| home.join(".codewhale").join("skills"))
-}
-
-fn default_mcp_config_path() -> Option<PathBuf> {
-    effective_home_dir().map(|home| {
-        let primary = home.join(".codewhale").join("mcp.json");
-        if primary.exists() {
-            return primary;
-        }
-        let legacy = home.join(".deepseek").join("mcp.json");
-        if legacy.exists() {
-            return legacy;
-        }
-        primary
-    })
-}
-
-fn default_notes_path() -> Option<PathBuf> {
-    effective_home_dir().map(|home| {
-        let primary = home.join(".codewhale").join("notes.txt");
-        if primary.exists() {
-            return primary;
-        }
-        let legacy = home.join(".deepseek").join("notes.txt");
-        if legacy.exists() {
-            return legacy;
-        }
-        primary
-    })
-}
-
-fn default_memory_path() -> Option<PathBuf> {
-    effective_home_dir().map(|home| {
-        let primary = home.join(".codewhale").join("memory.md");
-        if primary.exists() {
-            return primary;
-        }
-        let legacy = home.join(".deepseek").join("memory.md");
-        if legacy.exists() {
-            return legacy;
-        }
-        primary
-    })
 }
 
 // === Environment Overrides ===
