@@ -3178,14 +3178,36 @@ impl RuntimeThreadManager {
                     };
 
                     if auto_approve || trust_mode {
-                        match Self::approval_decision(auto_approve, trust_mode, false) {
-                            RuntimeApprovalDecision::ApproveTool => {
-                                let _ = engine.approve_tool_call(id).await;
-                            }
+                        let auto_decision =
+                            Self::approval_decision(auto_approve, trust_mode, false);
+                        let (dec_str, approved) = match auto_decision {
+                            RuntimeApprovalDecision::ApproveTool => ("allow", true),
                             RuntimeApprovalDecision::DenyTool
-                            | RuntimeApprovalDecision::RetryWithFullAccess => {
-                                let _ = engine.deny_tool_call(id).await;
-                            }
+                            | RuntimeApprovalDecision::RetryWithFullAccess => ("deny", false),
+                        };
+                        // Emit approval.decided so external clients (GUI)
+                        // know the approval was resolved automatically and
+                        // can clear any pending approval UI.  Without this
+                        // event the GUI would show a frozen approval dialog
+                        // that never receives approval.decided.
+                        self.emit_event(
+                            &thread_id,
+                            Some(&turn_id),
+                            None,
+                            "approval.decided",
+                            json!({
+                                "approval_id": id,
+                                "decision": dec_str,
+                                "remember": false,
+                                "auto": true,
+                            }),
+                        )
+                        .await
+                        .ok();
+                        if approved {
+                            let _ = engine.approve_tool_call(id).await;
+                        } else {
+                            let _ = engine.deny_tool_call(id).await;
                         }
                         continue;
                     }
