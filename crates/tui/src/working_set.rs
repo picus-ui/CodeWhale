@@ -655,6 +655,20 @@ fn expand_mention_home(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Truncate `s` to at most `max_bytes`, snapping down to a UTF-8 char
+/// boundary so the result is always valid. Returns the slice and whether any
+/// truncation happened.
+fn truncate_on_char_boundary(s: &str, max_bytes: usize) -> (&str, bool) {
+    if s.len() <= max_bytes {
+        return (s, false);
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&s[..end], true)
+}
+
 /// Configuration for working-set tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkingSetConfig {
@@ -666,6 +680,29 @@ pub struct WorkingSetConfig {
     pub max_scan_chars: usize,
     /// Maximum entries to show in the system prompt block.
     pub max_prompt_entries: usize,
+    /// Cache-maximal context mode (#528): when enabled, the working-set block
+    /// materializes the full current contents of the top active files into the
+    /// system prompt (deterministic order, size-bounded) instead of only a
+    /// path list. The contents stay byte-stable while the files are unchanged,
+    /// so DeepSeek's KV prefix cache keeps hitting; editing a file cache-misses
+    /// from that file's block onward. Off by default — existing behavior is the
+    /// path list only.
+    #[serde(default)]
+    pub cache_maximal: bool,
+    /// Per-file byte cap for materialized contents in cache-maximal mode.
+    #[serde(default = "default_max_resident_file_bytes")]
+    pub max_resident_file_bytes: usize,
+    /// Total byte cap across all materialized files in cache-maximal mode.
+    #[serde(default = "default_max_total_resident_bytes")]
+    pub max_total_resident_bytes: usize,
+}
+
+fn default_max_resident_file_bytes() -> usize {
+    24_000
+}
+
+fn default_max_total_resident_bytes() -> usize {
+    96_000
 }
 
 impl Default for WorkingSetConfig {
@@ -675,6 +712,9 @@ impl Default for WorkingSetConfig {
             max_pinned_paths: 8,
             max_scan_chars: 2_000,
             max_prompt_entries: 8,
+            cache_maximal: false,
+            max_resident_file_bytes: default_max_resident_file_bytes(),
+            max_total_resident_bytes: default_max_total_resident_bytes(),
         }
     }
 }
@@ -810,7 +850,7 @@ impl WorkingSet {
 
         if !prompt_entries.is_empty() {
             lines.push("Active paths (prioritize these):".to_string());
-            for entry in prompt_entries {
+            for entry in &prompt_entries {
                 let kind = if entry.is_dir { "dir" } else { "file" };
                 lines.push(format!("- {} ({kind})", entry.path));
             }
@@ -821,7 +861,103 @@ impl WorkingSet {
                 .to_string(),
         );
 
+        // Cache-maximal mode (#528): append the full current contents of the
+        // top active files so the model reads live source each turn instead of
+        // re-fetching it with tools. Kept after the path list and bounded by
+        // per-file and total byte caps; order follows `sorted_for_prompt` so
+        // the block is byte-stable while the files are unchanged.
+        if self.cache_maximal_enabled() && !prompt_entries.is_empty() {
+            self.append_resident_file_contents(&mut lines, workspace, &prompt_entries);
+        }
+
         Some(lines.join("\n"))
+    }
+
+    /// Whether cache-maximal context mode is active: explicit config, or the
+    /// `CODEWHALE_CACHE_MAXIMAL` env toggle (`1`/`true`/`on`/`yes`). The env
+    /// value is constant for the process, so the rendered block stays
+    /// byte-stable turn-over-turn.
+    fn cache_maximal_enabled(&self) -> bool {
+        if self.config.cache_maximal {
+            return true;
+        }
+        match std::env::var("CODEWHALE_CACHE_MAXIMAL") {
+            Ok(v) => matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on" | "yes"
+            ),
+            Err(_) => false,
+        }
+    }
+
+    /// Render `### Active file contents` blocks for the resident files, honoring
+    /// the per-file and total byte caps. Unreadable or non-UTF-8 files are noted
+    /// rather than skipped silently so the omission is visible to the model.
+    fn append_resident_file_contents(
+        &self,
+        lines: &mut Vec<String>,
+        workspace: &Path,
+        prompt_entries: &[&WorkingSetEntry],
+    ) {
+        let mut header_pushed = false;
+        let mut total_bytes: usize = 0;
+        let mut omitted: usize = 0;
+
+        for entry in prompt_entries {
+            if entry.is_dir || !entry.exists {
+                continue;
+            }
+            if total_bytes >= self.config.max_total_resident_bytes {
+                omitted += 1;
+                continue;
+            }
+
+            let abs = workspace.join(&entry.path);
+            let body = match std::fs::read_to_string(&abs) {
+                Ok(text) => text,
+                Err(_) => {
+                    if !header_pushed {
+                        lines.push("### Active file contents (cache-resident)".to_string());
+                        header_pushed = true;
+                    }
+                    lines.push(format!(
+                        "<!-- file: {} (unreadable, skipped) -->",
+                        entry.path
+                    ));
+                    continue;
+                }
+            };
+
+            if !header_pushed {
+                lines.push("### Active file contents (cache-resident)".to_string());
+                header_pushed = true;
+            }
+
+            let remaining_total = self
+                .config
+                .max_total_resident_bytes
+                .saturating_sub(total_bytes);
+            let cap = self.config.max_resident_file_bytes.min(remaining_total);
+            let (shown, truncated) = truncate_on_char_boundary(&body, cap);
+            total_bytes += shown.len();
+
+            lines.push(format!("<!-- file: {} -->", entry.path));
+            lines.push("```".to_string());
+            lines.push(shown.to_string());
+            if truncated {
+                lines.push(format!(
+                    "<!-- ...{} more bytes truncated for prompt budget -->",
+                    body.len().saturating_sub(shown.len())
+                ));
+            }
+            lines.push("```".to_string());
+        }
+
+        if omitted > 0 {
+            lines.push(format!(
+                "<!-- {omitted} additional active file(s) omitted from the cache-resident budget -->"
+            ));
+        }
     }
 
     /// Return the most relevant paths in score order.
@@ -1457,6 +1593,146 @@ mod tests {
 
         assert_ne!(before, after, "new path must update the rendered summary");
         assert!(after.contains("src/c.rs"));
+    }
+
+    // ── Cache-maximal context mode (#528) ──
+    // Tests drive the flag through `config.cache_maximal` directly so they
+    // don't touch the process-wide `CODEWHALE_CACHE_MAXIMAL` env var (which
+    // would race with parallel tests).
+
+    fn cache_maximal_ws() -> WorkingSet {
+        let mut ws = WorkingSet::default();
+        ws.config.cache_maximal = true;
+        ws
+    }
+
+    #[test]
+    fn cache_maximal_off_keeps_path_list_only() {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+        fs::write(src.join("lib.rs"), "pub fn hello() {}").expect("write");
+
+        let mut ws = WorkingSet::default(); // cache_maximal defaults to false
+        ws.observe_user_message("src/lib.rs", tmp.path());
+        let block = ws.summary_block(tmp.path()).expect("block");
+
+        assert!(block.contains("src/lib.rs"), "path list still present");
+        assert!(
+            !block.contains("Active file contents"),
+            "no materialized contents when the flag is off"
+        );
+        assert!(!block.contains("pub fn hello"));
+    }
+
+    #[test]
+    fn cache_maximal_on_materializes_file_contents() {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+        fs::write(src.join("lib.rs"), "pub fn hello() {}").expect("write");
+
+        let mut ws = cache_maximal_ws();
+        ws.observe_user_message("src/lib.rs", tmp.path());
+        let block = ws.summary_block(tmp.path()).expect("block");
+
+        assert!(block.contains("Active file contents (cache-resident)"));
+        assert!(block.contains("<!-- file: src/lib.rs -->"));
+        assert!(block.contains("pub fn hello() {}"));
+    }
+
+    #[test]
+    fn cache_maximal_directories_are_not_materialized() {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+
+        let mut ws = cache_maximal_ws();
+        ws.observe_user_message("look in src/", tmp.path());
+        let block = ws.summary_block(tmp.path()).expect("block");
+
+        // `src` is a dir; it appears in the path list but has no content block.
+        assert!(!block.contains("<!-- file: src -->"));
+    }
+
+    #[test]
+    fn cache_maximal_respects_per_file_byte_cap() {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+        let big = "x".repeat(10_000);
+        fs::write(src.join("big.rs"), &big).expect("write");
+
+        let mut ws = cache_maximal_ws();
+        ws.config.max_resident_file_bytes = 100;
+        ws.config.max_total_resident_bytes = 10_000;
+        ws.observe_user_message("src/big.rs", tmp.path());
+        let block = ws.summary_block(tmp.path()).expect("block");
+
+        assert!(block.contains("truncated for prompt budget"));
+        // The full 10k body must not be inlined.
+        assert!(!block.contains(&big));
+    }
+
+    #[test]
+    fn cache_maximal_total_cap_omits_extra_files() {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+        fs::write(src.join("a.rs"), &"a".repeat(200)).expect("write");
+        fs::write(src.join("b.rs"), &"b".repeat(200)).expect("write");
+
+        let mut ws = cache_maximal_ws();
+        ws.config.max_resident_file_bytes = 200;
+        ws.config.max_total_resident_bytes = 200; // only one file fits
+        ws.observe_user_message("Edit src/a.rs and src/b.rs", tmp.path());
+        let block = ws.summary_block(tmp.path()).expect("block");
+
+        assert!(
+            block.contains("omitted from the cache-resident budget"),
+            "second file should be reported as omitted:\n{block}"
+        );
+    }
+
+    #[test]
+    fn cache_maximal_is_byte_stable_when_files_unchanged() {
+        use crate::test_support::assert_byte_identical;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+        fs::write(src.join("a.rs"), "fn a() {}").expect("write");
+
+        let mut ws = cache_maximal_ws();
+        ws.observe_user_message("src/a.rs", tmp.path());
+        let before = ws.summary_block(tmp.path()).expect("before");
+        ws.next_turn();
+        let after = ws.summary_block(tmp.path()).expect("after");
+
+        assert_byte_identical(
+            "cache-maximal block must be stable while files are unchanged (KV cache hit)",
+            &before,
+            &after,
+        );
+    }
+
+    #[test]
+    fn cache_maximal_changes_when_file_edited() {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).expect("mkdir");
+        let file = src.join("a.rs");
+        fs::write(&file, "fn a() {}").expect("write");
+
+        let mut ws = cache_maximal_ws();
+        ws.observe_user_message("src/a.rs", tmp.path());
+        let before = ws.summary_block(tmp.path()).expect("before");
+
+        fs::write(&file, "fn a() { todo!() }").expect("rewrite");
+        let after = ws.summary_block(tmp.path()).expect("after");
+
+        assert_ne!(before, after, "editing the file must change the block");
+        assert!(after.contains("todo!()"));
     }
 
     #[test]
