@@ -1130,11 +1130,13 @@ pub fn system_prompt_for_mode_with_context_skills_session_and_approval(
                 workspace,
                 dir,
                 skill_discovery_mode,
+                session_context.locale_tag,
             )
         }
         None => crate::skills::render_available_skills_context_for_workspace_with_mode(
             workspace,
             skill_discovery_mode,
+            session_context.locale_tag,
         ),
     };
     if let Some(block) = skills_block {

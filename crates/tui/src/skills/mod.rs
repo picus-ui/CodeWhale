@@ -68,13 +68,45 @@ impl SkillDiscoveryMode {
 #[derive(Debug, Clone)]
 pub struct Skill {
     pub name: String,
+    /// Default (language-neutral, usually English) description.
     pub description: String,
+    /// Optional locale-specific descriptions, keyed by lowercased locale tag
+    /// (e.g. `zh`, `zh-hant`, `ja`). Populated from `description_<tag>:`
+    /// frontmatter keys so a skill author can ship a shorter, native-language
+    /// description for non-English sessions (saves prompt tokens; see #3354).
+    pub localized_descriptions: HashMap<String, String>,
     pub body: String,
     /// On-disk path to the `SKILL.md` this was loaded from. The directory
     /// name can differ from the frontmatter `name` for community installs
     /// or manually-placed skills, so callers must use this rather than
     /// reconstructing `<dir>/<name>/SKILL.md`.
     pub path: PathBuf,
+}
+
+impl Skill {
+    /// Pick the best description for a session `locale_tag`, falling back to the
+    /// default `description` when no localized variant matches.
+    ///
+    /// Matching is conservative on purpose: an exact (lowercased) tag match
+    /// first, then the primary language subtag (e.g. `zh-cn` → `zh`). We do not
+    /// fold e.g. `zh-hant` into `zh`, since Traditional and Simplified are
+    /// authored separately — an author keys each variant by the tag they mean.
+    #[must_use]
+    pub fn description_for_locale(&self, locale_tag: &str) -> &str {
+        if self.localized_descriptions.is_empty() {
+            return &self.description;
+        }
+        let normalized = locale_tag.trim().to_ascii_lowercase();
+        if let Some(desc) = self.localized_descriptions.get(&normalized) {
+            return desc;
+        }
+        if let Some((primary, _)) = normalized.split_once('-') {
+            if let Some(desc) = self.localized_descriptions.get(primary) {
+                return desc;
+            }
+        }
+        &self.description
+    }
 }
 
 /// Collection of discovered skills.
@@ -396,9 +428,21 @@ impl SkillRegistry {
 
             let description = metadata.get("description").cloned().unwrap_or_default();
 
+            // Collect `description_<tag>:` frontmatter keys (already lowercased
+            // above) into locale-specific descriptions, e.g. `description_zh`.
+            let localized_descriptions = metadata
+                .iter()
+                .filter_map(|(key, value)| {
+                    key.strip_prefix("description_")
+                        .filter(|tag| !tag.is_empty())
+                        .map(|tag| (tag.to_string(), value.clone()))
+                })
+                .collect();
+
             return Ok(Skill {
                 name,
                 description,
+                localized_descriptions,
                 body: body.trim().to_string(),
                 // Filled in by `discover` after parse succeeds; default to an
                 // empty path so direct constructors (e.g. tests) compile.
@@ -421,6 +465,7 @@ impl SkillRegistry {
         Ok(Skill {
             name,
             description: String::new(),
+            localized_descriptions: HashMap::new(),
             body: content.trim().to_string(),
             path: PathBuf::new(),
         })
@@ -686,16 +731,17 @@ pub(crate) fn discover_for_workspace_and_dir_with_home_and_mode(
 #[must_use]
 pub fn render_available_skills_context_for_workspace(workspace: &Path) -> Option<String> {
     let registry = discover_in_workspace(workspace);
-    render_skills_block(&registry)
+    render_skills_block(&registry, "en")
 }
 
 #[must_use]
 pub fn render_available_skills_context_for_workspace_with_mode(
     workspace: &Path,
     mode: SkillDiscoveryMode,
+    locale: &str,
 ) -> Option<String> {
     let registry = discover_in_workspace_with_mode(workspace, mode);
-    render_skills_block(&registry)
+    render_skills_block(&registry, locale)
 }
 
 /// Codex's progressive-disclosure contract: the model sees skill names,
@@ -709,7 +755,7 @@ pub fn render_available_skills_context_for_workspace_with_mode(
 #[must_use]
 fn render_available_skills_context(skills_dir: &Path) -> Option<String> {
     let registry = SkillRegistry::discover(skills_dir);
-    render_skills_block(&registry)
+    render_skills_block(&registry, "en")
 }
 
 /// Union variant: merge skills discovered in the `workspace` (cross-tool skill
@@ -723,6 +769,7 @@ pub fn render_available_skills_context_for_workspace_and_dir(
         workspace,
         skills_dir,
         SkillDiscoveryMode::Compatible,
+        "en",
     )
 }
 
@@ -731,12 +778,13 @@ pub fn render_available_skills_context_for_workspace_and_dir_with_mode(
     workspace: &Path,
     skills_dir: &Path,
     mode: SkillDiscoveryMode,
+    locale: &str,
 ) -> Option<String> {
     let registry = discover_for_workspace_and_dir_with_mode(workspace, skills_dir, mode);
-    render_skills_block(&registry)
+    render_skills_block(&registry, locale)
 }
 
-fn render_skills_block(registry: &SkillRegistry) -> Option<String> {
+fn render_skills_block(registry: &SkillRegistry, locale: &str) -> Option<String> {
     if registry.is_empty() {
         return None;
     }
@@ -757,7 +805,10 @@ instructions when using a specific skill.\n\n",
         // name can differ from the frontmatter `name` for community
         // installs, in which case `<dir>/<name>/SKILL.md` would not exist
         // and the model would fail to open it.
-        let description = truncate_for_prompt(&skill.description, MAX_SKILL_DESCRIPTION_CHARS);
+        let description = truncate_for_prompt(
+            skill.description_for_locale(locale),
+            MAX_SKILL_DESCRIPTION_CHARS,
+        );
         let line = if description.is_empty() {
             format!("- {}: (file: {})\n", skill.name, skill.path.display())
         } else {
@@ -979,6 +1030,7 @@ mod tests {
         registry.skills.push(super::Skill {
             name: "workspace-priority".to_string(),
             description: "must survive truncation".to_string(),
+            localized_descriptions: std::collections::HashMap::new(),
             body: "body".to_string(),
             path: tmpdir
                 .path()
@@ -993,6 +1045,7 @@ mod tests {
             registry.skills.push(super::Skill {
                 name: format!("aaa-global-{i:03}"),
                 description: big_desc.clone(),
+                localized_descriptions: std::collections::HashMap::new(),
                 body: "body".to_string(),
                 path: tmpdir
                     .path()
@@ -1003,7 +1056,7 @@ mod tests {
             });
         }
 
-        let rendered = super::render_skills_block(&registry).expect("skill context");
+        let rendered = super::render_skills_block(&registry, "en").expect("skill context");
         assert!(
             rendered.contains("workspace-priority"),
             "higher-precedence workspace skills must not be reordered behind globals:\n{rendered}"
@@ -1011,6 +1064,94 @@ mod tests {
         assert!(
             rendered.contains("additional skills omitted from this prompt budget"),
             "fixture should exceed prompt budget"
+        );
+    }
+
+    // --- Localized skill descriptions (#3354) ------------------------------
+
+    #[test]
+    fn parse_skill_collects_localized_description_frontmatter() {
+        let content = "---\n\
+name: demo\n\
+description: A demo skill\n\
+description_zh: 一个演示技能\n\
+description_zh-Hant: 一個示範技能\n\
+---\n\
+body";
+        let skill = super::SkillRegistry::parse_skill(std::path::Path::new("SKILL.md"), content)
+            .expect("parse should succeed");
+        assert_eq!(skill.description, "A demo skill");
+        assert_eq!(
+            skill.localized_descriptions.get("zh").map(String::as_str),
+            Some("一个演示技能")
+        );
+        // Frontmatter keys are lowercased, so zh-Hant is stored as zh-hant.
+        assert_eq!(
+            skill
+                .localized_descriptions
+                .get("zh-hant")
+                .map(String::as_str),
+            Some("一個示範技能")
+        );
+    }
+
+    #[test]
+    fn description_for_locale_matches_exact_then_primary_then_falls_back() {
+        let mut localized = std::collections::HashMap::new();
+        localized.insert("zh".to_string(), "中文描述".to_string());
+        localized.insert("ja".to_string(), "日本語の説明".to_string());
+        let skill = super::Skill {
+            name: "demo".to_string(),
+            description: "English description".to_string(),
+            localized_descriptions: localized,
+            body: String::new(),
+            path: std::path::PathBuf::new(),
+        };
+
+        assert_eq!(skill.description_for_locale("zh"), "中文描述"); // exact
+        assert_eq!(skill.description_for_locale("ZH"), "中文描述"); // case-insensitive
+        assert_eq!(skill.description_for_locale("zh-CN"), "中文描述"); // primary subtag
+        assert_eq!(skill.description_for_locale("ja"), "日本語の説明");
+        assert_eq!(skill.description_for_locale("fr"), "English description"); // fallback
+        assert_eq!(skill.description_for_locale("en"), "English description");
+    }
+
+    #[test]
+    fn description_for_locale_uses_default_when_no_localized_variants() {
+        let skill = super::Skill {
+            name: "demo".to_string(),
+            description: "only english".to_string(),
+            localized_descriptions: std::collections::HashMap::new(),
+            body: String::new(),
+            path: std::path::PathBuf::new(),
+        };
+        assert_eq!(skill.description_for_locale("zh"), "only english");
+    }
+
+    #[test]
+    fn render_skills_block_selects_description_by_locale() {
+        let mut registry = super::SkillRegistry::default();
+        let mut localized = std::collections::HashMap::new();
+        localized.insert("zh".to_string(), "压缩日志的技能".to_string());
+        registry.skills.push(super::Skill {
+            name: "compress".to_string(),
+            description: "Compress logs to save space".to_string(),
+            localized_descriptions: localized,
+            body: "body".to_string(),
+            path: std::path::PathBuf::from("/skills/compress/SKILL.md"),
+        });
+
+        let zh = super::render_skills_block(&registry, "zh-Hans").expect("zh block");
+        assert!(
+            zh.contains("压缩日志的技能"),
+            "zh session should get the zh description:\n{zh}"
+        );
+        assert!(!zh.contains("Compress logs to save space"));
+
+        let en = super::render_skills_block(&registry, "en").expect("en block");
+        assert!(
+            en.contains("Compress logs to save space"),
+            "en session keeps default:\n{en}"
         );
     }
 
