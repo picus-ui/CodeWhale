@@ -49,21 +49,24 @@ Implemented locally:
   - `authMethods` with terminal auth: `auth set --provider <provider>`
 - `session/new` creates an in-memory session with a cwd.
 - `session/prompt` accepts string prompts plus text/resource/resource_link
-  blocks, routes through the configured CodeWhale client, emits one
-  `session/update` agent message chunk, then returns `stopReason: "end_turn"`.
-- `session/prompt` now runs concurrently with the input reader, so a
-  `session/cancel` for the same session interrupts the in-flight provider call
-  mid-turn and the prompt returns `stopReason: "cancelled"`. A no-prompt
-  `session/cancel` stays an idempotent `null` no-op. The turn is single-flight:
-  another request arriving mid-turn gets a clear "prompt in progress" error
-  instead of being silently dropped.
+  blocks and routes through the configured CodeWhale client.
+- `session/prompt` **streams**: each provider text delta is emitted as a
+  `session/update` agent_message_chunk as it arrives, then the prompt returns
+  `stopReason: "end_turn"` (instead of buffering the whole turn and sending one
+  chunk at the end).
+- The stream is consumed concurrently with the input reader, so a
+  `session/cancel` for the same session interrupts the turn mid-stream and the
+  prompt returns `stopReason: "cancelled"`; dropping the stream aborts the
+  underlying provider connection. A no-prompt `session/cancel` stays an
+  idempotent `null` no-op. The turn is single-flight: another request arriving
+  mid-turn gets a clear "prompt in progress" error instead of being silently
+  dropped.
 
 Known limitations to state clearly:
 
 - The adapter is baseline ACP, not the full interactive TUI/runtime surface.
-- The response is emitted after the provider completes; it is not token
-  streaming. Cancellation aborts the awaited call but cannot interrupt within a
-  single non-streaming provider response.
+- Streaming covers text deltas only; thinking/tool/server-tool deltas are not
+  surfaced over ACP (ACP baseline here is text-only, `tools: None`).
 - ACP does not expose shell tools, file-write tools, checkpoint replay, session
   loading, or the HTTP/SSE runtime API.
 - Registry submission should be gated on a local run of the upstream registry
