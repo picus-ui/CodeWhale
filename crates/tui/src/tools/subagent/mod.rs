@@ -3531,6 +3531,40 @@ impl ToolSpec for AgentTool {
         ApprovalRequirement::Required
     }
 
+    /// #3801: status and peek are read-only queries — no approval needed.
+    fn approval_requirement_for(&self, input: &Value) -> ApprovalRequirement {
+        match parse_agent_tool_action(input) {
+            Ok(AgentToolAction::Status) | Ok(AgentToolAction::Peek) => ApprovalRequirement::Auto,
+            _ => ApprovalRequirement::Required,
+        }
+    }
+
+    /// #3801: `action=start` launches a background agent and returns immediately —
+    /// it is a detached start that should not hold the global tool-exec write
+    /// lock while the child spins up.  In auto-approved modes (YOLO) this lets
+    /// multiple independent `agent start` calls join a single parallel batch
+    /// instead of being serialized N ways.
+    fn starts_detached_for(&self, input: &Value) -> bool {
+        matches!(parse_agent_tool_action(input), Ok(AgentToolAction::Start))
+    }
+
+    /// #3801: Read-only `agent` actions (status, peek) can safely run in
+    /// parallel batches.
+    fn supports_parallel_for(&self, input: &Value) -> bool {
+        matches!(
+            parse_agent_tool_action(input),
+            Ok(AgentToolAction::Status) | Ok(AgentToolAction::Peek)
+        )
+    }
+
+    /// #3801: status/peek/cancel actions are read-only queries of manager state.
+    fn is_read_only_for(&self, input: &Value) -> bool {
+        matches!(
+            parse_agent_tool_action(input),
+            Ok(AgentToolAction::Status) | Ok(AgentToolAction::Peek)
+        )
+    }
+
     async fn execute(&self, input: Value, context: &ToolContext) -> Result<ToolResult, ToolError> {
         let action = parse_agent_tool_action(&input)?;
         match action {

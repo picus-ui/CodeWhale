@@ -1168,6 +1168,68 @@ fn background_verifier_starts_batch_with_readonly_tools_when_auto_approved() {
     }
 }
 
+// #3801: agent `action=start` plans with `detached_start=true` and no approval
+// (YOLO / auto-approve mode) should all join one parallel batch instead of
+// being serialized N ways under the global tool-execution write lock.
+#[test]
+fn agent_start_detached_plans_join_single_parallel_batch() {
+    // Simulate 4 independent `agent start` calls — each is a detached_start,
+    // not read-only, not parallel-safe in the read-only sense, but qualifies
+    // for the detached-start parallel-batch path.
+    let plans: Vec<ToolExecutionPlan> = (0..4)
+        .map(|i| {
+            let mut plan = make_plan_at(i, false, false, false, false);
+            plan.name = "agent".to_string();
+            plan.detached_start = true;
+            plan
+        })
+        .collect();
+
+    let batches = plan_tool_execution_batches(plans);
+    assert_eq!(
+        batches.len(),
+        1,
+        "all 4 agent starts should form 1 parallel batch"
+    );
+    match &batches[0] {
+        ToolExecutionBatch::Parallel(plans) => {
+            assert_eq!(plans.len(), 4);
+            assert!(
+                plans.iter().all(|p| p.detached_start),
+                "every plan in the parallel batch should be a detached_start"
+            );
+        }
+        ToolExecutionBatch::Serial(_) => {
+            panic!("agent starts should be parallel, not serial");
+        }
+    }
+}
+
+// #3801: mixed agent starts and read-only tools should coexist in a parallel batch.
+#[test]
+fn agent_start_detached_plans_batch_with_readonly_tools() {
+    let mut grep_a = make_plan_at(0, true, true, false, false);
+    grep_a.name = "grep_files".to_string();
+
+    let mut agent_start = make_plan_at(1, false, false, false, false);
+    agent_start.name = "agent".to_string();
+    agent_start.detached_start = true;
+
+    let mut grep_b = make_plan_at(2, true, true, false, false);
+    grep_b.name = "grep_files".to_string();
+
+    let batches = plan_tool_execution_batches(vec![grep_a, agent_start, grep_b]);
+    assert_eq!(batches.len(), 1);
+    match &batches[0] {
+        ToolExecutionBatch::Parallel(plans) => {
+            assert_eq!(plans.len(), 3);
+        }
+        ToolExecutionBatch::Serial(_) => {
+            panic!("read-only tools + detached agent start should form 1 parallel batch");
+        }
+    }
+}
+
 #[test]
 fn successful_update_plan_ends_plan_mode_turn_immediately() {
     assert!(should_stop_after_plan_tool(
