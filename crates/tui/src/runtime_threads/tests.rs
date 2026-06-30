@@ -26,6 +26,22 @@ fn test_manager(data_dir: PathBuf) -> Result<RuntimeThreadManager> {
     )
 }
 
+struct ApprovalTimeoutGuard {
+    previous_ms: u64,
+}
+
+impl Drop for ApprovalTimeoutGuard {
+    fn drop(&mut self) {
+        set_test_approval_decision_timeout_ms(self.previous_ms);
+    }
+}
+
+fn test_approval_timeout_ms(ms: u64) -> ApprovalTimeoutGuard {
+    ApprovalTimeoutGuard {
+        previous_ms: set_test_approval_decision_timeout_ms(ms),
+    }
+}
+
 fn sample_thread(thread_id: &str) -> ThreadRecord {
     let now = Utc::now();
     ThreadRecord {
@@ -1713,6 +1729,125 @@ async fn approval_required_external_deny_is_denied() -> Result<()> {
             base_url: None,
         })
         .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn approval_timeout_denies_clears_ui_and_next_turn_can_start() -> Result<()> {
+    let _timeout_guard = test_approval_timeout_ms(25);
+    let manager = test_manager(test_runtime_dir())?;
+    let thread = manager
+        .create_thread(CreateThreadRequest {
+            model: None,
+            workspace: None,
+            mode: None,
+            allow_shell: None,
+            trust_mode: None,
+            auto_approve: None,
+            archived: false,
+            system_prompt: None,
+            task_id: None,
+            ..Default::default()
+        })
+        .await?;
+
+    let mut harness = install_mock_engine(&manager, &thread.id).await;
+    let turn = manager
+        .start_turn(
+            &thread.id,
+            StartTurnRequest {
+                prompt: "needs approval".to_string(),
+                input_summary: None,
+                model: None,
+                mode: None,
+                allow_shell: None,
+                trust_mode: None,
+                auto_approve: None,
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert!(matches!(
+        harness.rx_op.recv().await,
+        Some(Op::SendMessage { .. })
+    ));
+
+    harness
+        .tx_event
+        .send(EngineEvent::ApprovalRequired {
+            approval_key: "timeout_key".to_string(),
+            approval_grouping_key: "timeout_key".to_string(),
+            id: "tool_timeout".to_string(),
+            tool_name: "exec_command".to_string(),
+            description: "external timeout".to_string(),
+            input: serde_json::json!({}),
+            intent_summary: None,
+            approval_force_prompt: false,
+        })
+        .await?;
+
+    let decision = tokio::time::timeout(Duration::from_secs(2), harness.recv_approval_event())
+        .await
+        .context("approval timeout should deny the engine")?;
+    assert_eq!(
+        decision,
+        Some(MockApprovalEvent::Denied {
+            id: "tool_timeout".to_string(),
+        })
+    );
+    assert_eq!(manager.pending_approvals_count(), 0);
+
+    let events = manager.events_since(&thread.id, None)?;
+    assert!(
+        events.iter().any(|event| {
+            event.event == "approval.timeout"
+                && event.payload.get("approval_id").and_then(Value::as_str) == Some("tool_timeout")
+        }),
+        "timeout event should be persisted"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.event == "approval.decided"
+                && event.payload.get("approval_id").and_then(Value::as_str) == Some("tool_timeout")
+                && event.payload.get("decision").and_then(Value::as_str) == Some("deny")
+                && event.payload.get("timeout").and_then(Value::as_bool) == Some(true)
+        }),
+        "timeout should also emit approval.decided so clients can clear pending UI"
+    );
+
+    harness
+        .tx_event
+        .send(EngineEvent::TurnComplete {
+            usage: Usage::default(),
+            status: TurnOutcomeStatus::Completed,
+            error: None,
+            tool_catalog: None,
+            base_url: None,
+        })
+        .await?;
+    let terminal = wait_for_terminal_turn(&manager, &turn.id, Duration::from_secs(2)).await?;
+    assert_eq!(terminal.status, RuntimeTurnStatus::Completed);
+
+    let _next = manager
+        .start_turn(
+            &thread.id,
+            StartTurnRequest {
+                prompt: "after timeout".to_string(),
+                input_summary: None,
+                model: None,
+                mode: None,
+                allow_shell: None,
+                trust_mode: None,
+                auto_approve: None,
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert!(
+        matches!(harness.rx_op.recv().await, Some(Op::SendMessage { .. })),
+        "thread should accept a fresh turn after approval timeout cleanup"
+    );
+
     Ok(())
 }
 

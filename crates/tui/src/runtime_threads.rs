@@ -81,6 +81,26 @@ const RUNTIME_RESTART_REASON: &str = "Interrupted by process restart";
 const EMPTY_TURN_REASON: &str = "Turn completed without engine output";
 const APPROVAL_DECISION_TIMEOUT: Duration = Duration::from_secs(300);
 
+#[cfg(test)]
+static TEST_APPROVAL_DECISION_TIMEOUT_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn approval_decision_timeout() -> Duration {
+    #[cfg(test)]
+    {
+        let ms = TEST_APPROVAL_DECISION_TIMEOUT_MS.load(std::sync::atomic::Ordering::SeqCst);
+        if ms > 0 {
+            return Duration::from_millis(ms);
+        }
+    }
+    APPROVAL_DECISION_TIMEOUT
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_approval_decision_timeout_ms(ms: u64) -> u64 {
+    TEST_APPROVAL_DECISION_TIMEOUT_MS.swap(ms, std::sync::atomic::Ordering::SeqCst)
+}
+
 const fn default_runtime_schema_version() -> u32 {
     CURRENT_RUNTIME_SCHEMA_VERSION
 }
@@ -3329,7 +3349,8 @@ impl RuntimeThreadManager {
                     }
 
                     let rx = self.register_pending_approval(&id);
-                    match tokio::time::timeout(APPROVAL_DECISION_TIMEOUT, rx).await {
+                    let approval_timeout = approval_decision_timeout();
+                    match tokio::time::timeout(approval_timeout, rx).await {
                         Ok(Ok(ExternalApprovalDecision::Allow { remember })) => {
                             if remember {
                                 self.remember_thread_auto_approve(&thread_id).await;
@@ -3378,7 +3399,21 @@ impl RuntimeThreadManager {
                                 "approval.timeout",
                                 json!({
                                     "approval_id": id,
-                                    "timeout_secs": APPROVAL_DECISION_TIMEOUT.as_secs(),
+                                    "timeout_secs": approval_timeout.as_secs(),
+                                }),
+                            )
+                            .await
+                            .ok();
+                            self.emit_event(
+                                &thread_id,
+                                Some(&turn_id),
+                                None,
+                                "approval.decided",
+                                json!({
+                                    "approval_id": id,
+                                    "decision": "deny",
+                                    "remember": false,
+                                    "timeout": true,
                                 }),
                             )
                             .await
@@ -3817,7 +3852,8 @@ impl crate::tools::spec::DynamicToolExecutor for RuntimeThreadManager {
             )));
         }
 
-        match tokio::time::timeout(APPROVAL_DECISION_TIMEOUT, rx).await {
+        let approval_timeout = approval_decision_timeout();
+        match tokio::time::timeout(approval_timeout, rx).await {
             Ok(Ok(result)) => {
                 let text = dynamic_tool_result_text(&result.content);
                 if result.success {
@@ -3836,7 +3872,7 @@ impl crate::tools::spec::DynamicToolExecutor for RuntimeThreadManager {
             Err(_timeout) => {
                 self.cancel_pending_dynamic_tool(&call_id);
                 Err(crate::tools::spec::ToolError::Timeout {
-                    seconds: APPROVAL_DECISION_TIMEOUT.as_secs(),
+                    seconds: approval_timeout.as_secs(),
                 })
             }
         }
