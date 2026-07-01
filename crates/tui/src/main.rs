@@ -2274,7 +2274,7 @@ fn run_setup(config: &Config, workspace: &Path, args: SetupArgs) -> Result<()> {
 
     println!(
         "{}",
-        "DeepSeek Setup".truecolor(aqua_r, aqua_g, aqua_b).bold()
+        "CodeWhale Setup".truecolor(aqua_r, aqua_g, aqua_b).bold()
     );
     println!("{}", "==============".truecolor(sky_r, sky_g, sky_b));
     println!("Workspace: {}", crate::utils::display_path(workspace));
@@ -2486,7 +2486,7 @@ fn run_setup_status(config: &Config, workspace: &Path) -> Result<()> {
 
     println!(
         "{}",
-        "DeepSeek Status".truecolor(aqua_r, aqua_g, aqua_b).bold()
+        "CodeWhale Status".truecolor(aqua_r, aqua_g, aqua_b).bold()
     );
     println!("{}", "===============".truecolor(sky_r, sky_g, sky_b));
     println!("workspace: {}", workspace.display());
@@ -2799,7 +2799,7 @@ async fn run_doctor(config: &Config, workspace: &Path, config_path_override: Opt
     println!("  active: {}", crate::utils::display_path(active_root));
     if active_root != &code_home {
         println!(
-            "  note: legacy {} found; migrate with `codewhale setup --migrate`",
+            "  note: legacy {} found; start CodeWhale once to trigger safe migration where available.",
             crate::utils::display_path(&legacy_home)
         );
     }
@@ -3707,7 +3707,7 @@ fn print_doctor_legacy_state_report(
         }
     }
     println!(
-        "    Run `codewhale setup --migrate` or start CodeWhale once to trigger safe migration where available."
+        "    Start CodeWhale once to trigger safe migration where available, then rerun `codewhale doctor`."
     );
 }
 
