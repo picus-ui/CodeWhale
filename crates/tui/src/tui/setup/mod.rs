@@ -135,6 +135,7 @@ pub struct SetupWizardView {
     selected: usize,
     locale: Locale,
     facts: SetupRuntimeFacts,
+    guided_draft: GuidedConstitutionDraft,
     guided_preview_seen: bool,
 }
 
@@ -256,6 +257,388 @@ impl SetupRuntimeFacts {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GuidedConstitutionDraft {
+    purpose: GuidedPurpose,
+    autonomy: AutonomyPreference,
+    evidence: GuidedEvidence,
+    communication: GuidedCommunication,
+    privacy: GuidedPrivacy,
+}
+
+impl Default for GuidedConstitutionDraft {
+    fn default() -> Self {
+        Self {
+            purpose: GuidedPurpose::Coding,
+            autonomy: AutonomyPreference::Balanced,
+            evidence: GuidedEvidence::TestsAndReceipts,
+            communication: GuidedCommunication::Concise,
+            privacy: GuidedPrivacy::StandardCare,
+        }
+    }
+}
+
+impl GuidedConstitutionDraft {
+    fn cycle(&mut self, key: char) -> bool {
+        match key {
+            '1' => self.purpose = self.purpose.next(),
+            '2' => self.autonomy = next_guided_autonomy(self.autonomy),
+            '3' => self.evidence = self.evidence.next(),
+            '4' => self.communication = self.communication.next(),
+            '5' => self.privacy = self.privacy.next(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn to_constitution(self, locale: Locale) -> UserConstitution {
+        UserConstitution {
+            language: Some(locale.tag().to_string()),
+            about: Some(self.purpose.about(locale).to_string()),
+            working_style: vec![
+                self.purpose.working_style(locale).to_string(),
+                self.communication.working_style(locale).to_string(),
+                self.evidence.working_style(locale).to_string(),
+                self.privacy.working_style(locale).to_string(),
+            ],
+            priorities: vec![
+                authority_priority(locale).to_string(),
+                autonomy_priority(self.autonomy, locale).to_string(),
+                self.privacy.escalation_rule(locale).to_string(),
+            ],
+            autonomy_preference: self.autonomy,
+            notes: Some(self.notes(locale)),
+            ..UserConstitution::default()
+        }
+    }
+
+    fn notes(self, locale: Locale) -> String {
+        match locale {
+            Locale::ZhHans => format!(
+                "引导式答案：用途={}；主动性={}；证据={}；沟通={}；隐私={}。自由文本只作为建议，不会改变审批、沙箱、Shell、网络、信任或 MCP 权限。",
+                self.purpose.label(locale),
+                autonomy_label(self.autonomy, locale),
+                self.evidence.label(locale),
+                self.communication.label(locale),
+                self.privacy.label(locale)
+            ),
+            _ => format!(
+                "Guided answers: purpose={}; initiative={}; evidence={}; communication={}; privacy={}. Freeform principles are advisory and do not change approval, sandbox, shell, network, trust, or MCP permissions.",
+                self.purpose.label(locale),
+                autonomy_label(self.autonomy, locale),
+                self.evidence.label(locale),
+                self.communication.label(locale),
+                self.privacy.label(locale)
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuidedPurpose {
+    Coding,
+    Research,
+    Operations,
+    Mixed,
+}
+
+impl GuidedPurpose {
+    fn next(self) -> Self {
+        match self {
+            Self::Coding => Self::Research,
+            Self::Research => Self::Operations,
+            Self::Operations => Self::Mixed,
+            Self::Mixed => Self::Coding,
+        }
+    }
+
+    fn label(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Coding) => "编码工作台",
+            (Locale::ZhHans, Self::Research) => "研究综合",
+            (Locale::ZhHans, Self::Operations) => "运维协作",
+            (Locale::ZhHans, Self::Mixed) => "混合工作台",
+            (_, Self::Coding) => "coding workbench",
+            (_, Self::Research) => "research synthesis",
+            (_, Self::Operations) => "operations helper",
+            (_, Self::Mixed) => "mixed workbench",
+        }
+    }
+
+    fn about(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Coding) => "希望 CodeWhale 成为稳健、重证据的编码工作台用户。",
+            (Locale::ZhHans, Self::Research) => {
+                "希望 CodeWhale 帮助梳理实时资料、引用证据并谨慎综合研究的用户。"
+            }
+            (Locale::ZhHans, Self::Operations) => {
+                "希望 CodeWhale 协助可靠执行运维任务、保留回滚点并明确风险的用户。"
+            }
+            (Locale::ZhHans, Self::Mixed) => {
+                "希望 CodeWhale 在编码、研究、写作和运维之间灵活切换的用户。"
+            }
+            (_, Self::Coding) => {
+                "A CodeWhale user who wants a calm, evidence-first coding workbench."
+            }
+            (_, Self::Research) => {
+                "A CodeWhale user who wants current, cited research and careful synthesis."
+            }
+            (_, Self::Operations) => {
+                "A CodeWhale user who wants reliable operational help with clear rollback points."
+            }
+            (_, Self::Mixed) => {
+                "A CodeWhale user who wants a flexible workbench for coding, research, writing, and operations."
+            }
+        }
+    }
+
+    fn working_style(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Coding) => "让代码改动贴近请求、仓库模式和可验证行为。",
+            (Locale::ZhHans, Self::Research) => "区分实时证据与推断，并为易变事实引用来源。",
+            (Locale::ZhHans, Self::Operations) => {
+                "优先使用可逆运维步骤、预演、状态检查和回滚说明。"
+            }
+            (Locale::ZhHans, Self::Mixed) => {
+                "可在编码、研究、写作和运维之间切换，但安全姿态不随意扩大。"
+            }
+            (_, Self::Coding) => {
+                "Keep code changes scoped to requested behavior and existing repo patterns."
+            }
+            (_, Self::Research) => {
+                "Separate live evidence from inference and cite sources for unstable facts."
+            }
+            (_, Self::Operations) => {
+                "Prefer reversible operational steps with dry-runs, status checks, and rollback notes."
+            }
+            (_, Self::Mixed) => {
+                "Adapt between coding, research, writing, and operations without widening the safety posture."
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuidedEvidence {
+    Assumptions,
+    TestsAndReceipts,
+    ReleaseReceipts,
+}
+
+impl GuidedEvidence {
+    fn next(self) -> Self {
+        match self {
+            Self::Assumptions => Self::TestsAndReceipts,
+            Self::TestsAndReceipts => Self::ReleaseReceipts,
+            Self::ReleaseReceipts => Self::Assumptions,
+        }
+    }
+
+    fn label(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Assumptions) => "说明假设",
+            (Locale::ZhHans, Self::TestsAndReceipts) => "测试/凭据",
+            (Locale::ZhHans, Self::ReleaseReceipts) => "发布凭据",
+            (_, Self::Assumptions) => "assumptions",
+            (_, Self::TestsAndReceipts) => "tests/receipts",
+            (_, Self::ReleaseReceipts) => "release receipts",
+        }
+    }
+
+    fn working_style(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Assumptions) => "在宣称完成前总结假设、未知和剩余风险。",
+            (Locale::ZhHans, Self::TestsAndReceipts) => {
+                "在能降低不确定性时，用命令、测试、截图或引用给出具体验证。"
+            }
+            (Locale::ZhHans, Self::ReleaseReceipts) => {
+                "对重要结论和发布证据标注文件、命令、截图、CI 或来源。"
+            }
+            (_, Self::Assumptions) => {
+                "Summarize assumptions, unknowns, and remaining risk before claiming completion."
+            }
+            (_, Self::TestsAndReceipts) => {
+                "Use commands, tests, screenshots, or citations when they materially reduce uncertainty."
+            }
+            (_, Self::ReleaseReceipts) => {
+                "Cite file paths, commands, screenshots, CI, or sources for material claims and release evidence."
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuidedCommunication {
+    Concise,
+    Teaching,
+    Direct,
+}
+
+impl GuidedCommunication {
+    fn next(self) -> Self {
+        match self {
+            Self::Concise => Self::Teaching,
+            Self::Teaching => Self::Direct,
+            Self::Direct => Self::Concise,
+        }
+    }
+
+    fn label(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Concise) => "简洁",
+            (Locale::ZhHans, Self::Teaching) => "教学式",
+            (Locale::ZhHans, Self::Direct) => "直接",
+            (_, Self::Concise) => "concise",
+            (_, Self::Teaching) => "teaching",
+            (_, Self::Direct) => "direct",
+        }
+    }
+
+    fn working_style(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::Concise) => "保持更新简洁，并只解释重要取舍。",
+            (Locale::ZhHans, Self::Teaching) => "解释关键推理和取舍，让用户能理解系统。",
+            (Locale::ZhHans, Self::Direct) => "直接说明阻塞、风险和不确定性，避免装饰性文案。",
+            (_, Self::Concise) => "Keep updates concise and explain important tradeoffs briefly.",
+            (_, Self::Teaching) => {
+                "Explain key reasoning and tradeoffs enough that the user can learn the system."
+            }
+            (_, Self::Direct) => {
+                "Be direct about blockers, risk, and uncertainty; avoid ornamental copy."
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuidedPrivacy {
+    StandardCare,
+    StrictBoundaries,
+    ProjectLocal,
+}
+
+impl GuidedPrivacy {
+    fn next(self) -> Self {
+        match self {
+            Self::StandardCare => Self::StrictBoundaries,
+            Self::StrictBoundaries => Self::ProjectLocal,
+            Self::ProjectLocal => Self::StandardCare,
+        }
+    }
+
+    fn label(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::StandardCare) => "标准保护",
+            (Locale::ZhHans, Self::StrictBoundaries) => "严格边界",
+            (Locale::ZhHans, Self::ProjectLocal) => "项目内记忆",
+            (_, Self::StandardCare) => "standard care",
+            (_, Self::StrictBoundaries) => "strict boundaries",
+            (_, Self::ProjectLocal) => "project-local memory",
+        }
+    }
+
+    fn working_style(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::StandardCare) => {
+                "保护密钥、用户文件、Git 历史、生产系统、成本、隐私和时间。"
+            }
+            (Locale::ZhHans, Self::StrictBoundaries) => {
+                "把密钥、个人数据、凭据、生产状态、资金和发布动作视为先确认边界。"
+            }
+            (Locale::ZhHans, Self::ProjectLocal) => {
+                "项目特定上下文留在项目内，除非明确要求，否则不要写入记忆。"
+            }
+            (_, Self::StandardCare) => {
+                "Protect secrets, user files, git history, production systems, cost, privacy, and time."
+            }
+            (_, Self::StrictBoundaries) => {
+                "Treat secrets, personal data, credentials, production state, money, and publish actions as stop-and-confirm boundaries."
+            }
+            (_, Self::ProjectLocal) => {
+                "Keep project-specific context local; avoid carrying sensitive details into memory unless explicitly asked."
+            }
+        }
+    }
+
+    fn escalation_rule(self, locale: Locale) -> &'static str {
+        match (locale, self) {
+            (Locale::ZhHans, Self::StandardCare) => {
+                "遇到破坏性、高成本、凭据、发布、法律或安全风险操作时先询问。"
+            }
+            (Locale::ZhHans, Self::StrictBoundaries) => {
+                "在读取或传播敏感信息、触碰生产系统、花费资金或发布内容前停止并询问。"
+            }
+            (Locale::ZhHans, Self::ProjectLocal) => {
+                "需要跨项目记忆、复制项目细节或引用旧交接时，先确认这些上下文仍适用。"
+            }
+            (_, Self::StandardCare) => {
+                "Ask before destructive, high-cost, credential, publishing, legal, or security-risk actions."
+            }
+            (_, Self::StrictBoundaries) => {
+                "Stop and ask before reading or spreading sensitive data, touching production systems, spending money, or publishing."
+            }
+            (_, Self::ProjectLocal) => {
+                "Confirm before carrying project details across memory, workspaces, or stale handoffs."
+            }
+        }
+    }
+}
+
+fn next_guided_autonomy(preference: AutonomyPreference) -> AutonomyPreference {
+    match preference {
+        AutonomyPreference::Unspecified | AutonomyPreference::Cautious => {
+            AutonomyPreference::Balanced
+        }
+        AutonomyPreference::Balanced => AutonomyPreference::Autonomous,
+        AutonomyPreference::Autonomous => AutonomyPreference::Cautious,
+    }
+}
+
+fn autonomy_label(preference: AutonomyPreference, locale: Locale) -> &'static str {
+    match (locale, preference) {
+        (Locale::ZhHans, AutonomyPreference::Cautious) => "谨慎",
+        (Locale::ZhHans, AutonomyPreference::Balanced) => "平衡",
+        (Locale::ZhHans, AutonomyPreference::Autonomous) => "积极主动",
+        (_, AutonomyPreference::Cautious) => "cautious",
+        (_, AutonomyPreference::Balanced) => "balanced",
+        (_, AutonomyPreference::Autonomous) => "ambitious",
+        (_, AutonomyPreference::Unspecified) => "unspecified",
+    }
+}
+
+fn autonomy_priority(preference: AutonomyPreference, locale: Locale) -> &'static str {
+    match (locale, preference) {
+        (Locale::ZhHans, AutonomyPreference::Cautious) => {
+            "在编辑文件、运行命令或产品选择不明确前，倾向先停下询问。"
+        }
+        (Locale::ZhHans, AutonomyPreference::Balanced) => {
+            "清晰低风险任务可直接行动；遇到风险、破坏性或歧义时先确认。"
+        }
+        (Locale::ZhHans, AutonomyPreference::Autonomous) => {
+            "可批量处理安全的常规工作，但遇到破坏性、凭据、发布、高成本、法律或安全风险时停止询问。"
+        }
+        (_, AutonomyPreference::Cautious) => {
+            "Stop and ask before editing files, running commands, or choosing between ambiguous product paths."
+        }
+        (_, AutonomyPreference::Balanced) => {
+            "Act directly on clear low-risk tasks; confirm before risky, destructive, or ambiguous actions."
+        }
+        (_, AutonomyPreference::Autonomous) => {
+            "Batch routine safe work, then stop for destructive, credential, publishing, high-cost, legal, or security-risk actions."
+        }
+        (_, AutonomyPreference::Unspecified) => "No standing initiative preference was selected.",
+    }
+}
+
+fn authority_priority(locale: Locale) -> &'static str {
+    match locale {
+        Locale::ZhHans => "当前用户请求和实时工具证据优先于记忆、陈旧交接和猜测。",
+        _ => {
+            "Current user requests and live tool evidence outrank memory, stale handoffs, and guesses."
+        }
+    }
+}
+
 impl SetupWizardView {
     #[cfg(test)]
     #[must_use]
@@ -266,6 +649,7 @@ impl SetupWizardView {
             selected,
             locale,
             facts: SetupRuntimeFacts::default(),
+            guided_draft: GuidedConstitutionDraft::default(),
             guided_preview_seen: false,
         }
     }
@@ -311,6 +695,7 @@ impl SetupWizardView {
             selected,
             locale,
             facts,
+            guided_draft: GuidedConstitutionDraft::default(),
             guided_preview_seen: false,
         }
     }
@@ -326,6 +711,7 @@ impl SetupWizardView {
             selected: step_index(step),
             locale,
             facts,
+            guided_draft: GuidedConstitutionDraft::default(),
             guided_preview_seen: false,
         }
     }
@@ -431,7 +817,7 @@ impl SetupWizardView {
             return self.preview_guided_constitution();
         }
 
-        let constitution = guided_constitution_template(self.locale);
+        let constitution = self.guided_draft.to_constitution(self.locale);
         let mut state = self.state.clone();
         state.complete_constitution_checkpoint(
             CONSTITUTION_CHECKPOINT_VERSION,
@@ -464,8 +850,15 @@ impl SetupWizardView {
         self.guided_preview_seen = true;
         ViewAction::Emit(ViewEvent::OpenTextPager {
             title: "Guided Constitution Preview".to_string(),
-            content: guided_constitution_preview_text(self.locale),
+            content: guided_constitution_preview_text(self.locale, self.guided_draft),
         })
+    }
+
+    fn cycle_guided_answer(&mut self, key: char) -> ViewAction {
+        if self.guided_draft.cycle(key) {
+            self.guided_preview_seen = false;
+        }
+        ViewAction::None
     }
 
     fn commit_constitution(&self, kind: SetupCommitKind) -> ViewAction {
@@ -549,6 +942,11 @@ impl ModalView for SetupWizardView {
             KeyCode::Char('g') if self.selected_step() == SetupStep::Constitution => {
                 self.commit_guided_constitution()
             }
+            KeyCode::Char(key @ ('1' | '2' | '3' | '4' | '5'))
+                if self.selected_step() == SetupStep::Constitution =>
+            {
+                self.cycle_guided_answer(key)
+            }
             KeyCode::Char('u') => self.commit_constitution(SetupCommitKind::BundledConstitution),
             KeyCode::Char('d') => self.commit_constitution(SetupCommitKind::DeferredConstitution),
             KeyCode::Enter if self.selected_step() == SetupStep::Constitution => {
@@ -612,6 +1010,10 @@ impl ModalView for SetupWizardView {
             ),
         ];
         if self.selected_step() == SetupStep::Constitution {
+            hints.push(ActionHint::new(
+                "1-5",
+                tr(self.locale, MessageId::SetupActionTuneGuided).to_string(),
+            ));
             hints.push(ActionHint::new(
                 "G",
                 tr(self.locale, MessageId::SetupActionGuided).to_string(),
@@ -732,6 +1134,39 @@ impl SetupWizardView {
             self.detail_row(MessageId::SetupConstitutionSourceLabel, source),
             self.detail_row(MessageId::SetupConstitutionValidityLabel, validity),
             self.detail_row(MessageId::SetupConstitutionPreviewLabel, &preview),
+            Line::from(Span::styled(
+                tr(self.locale, MessageId::SetupConstitutionGuidedAnswersHint).to_string(),
+                Style::default().fg(palette::TEXT_MUTED),
+            )),
+            self.guided_answer_pair(
+                (
+                    "1",
+                    MessageId::SetupConstitutionPurposeLabel,
+                    self.guided_draft.purpose.label(self.locale),
+                ),
+                (
+                    "2",
+                    MessageId::SetupConstitutionAutonomyLabel,
+                    autonomy_label(self.guided_draft.autonomy, self.locale),
+                ),
+            ),
+            self.guided_answer_pair(
+                (
+                    "3",
+                    MessageId::SetupConstitutionEvidenceLabel,
+                    self.guided_draft.evidence.label(self.locale),
+                ),
+                (
+                    "4",
+                    MessageId::SetupConstitutionCommunicationLabel,
+                    self.guided_draft.communication.label(self.locale),
+                ),
+            ),
+            self.guided_answer_single(
+                "5",
+                MessageId::SetupConstitutionPrivacyLabel,
+                self.guided_draft.privacy.label(self.locale),
+            ),
             Line::from(Span::styled(
                 tr(self.locale, MessageId::SetupConstitutionGuidedHint).to_string(),
                 Style::default().fg(palette::TEXT_MUTED),
@@ -856,6 +1291,41 @@ impl SetupWizardView {
             Span::raw(value.to_string()),
         ])
     }
+
+    fn guided_answer_pair(
+        &self,
+        left: (&str, MessageId, &str),
+        right: (&str, MessageId, &str),
+    ) -> Line<'static> {
+        let label_style = Style::default()
+            .fg(palette::TEXT_MUTED)
+            .add_modifier(Modifier::BOLD);
+        Line::from(vec![
+            Span::styled(
+                format!("{} {} ", left.0, tr(self.locale, left.1)),
+                label_style,
+            ),
+            Span::raw(left.2.to_string()),
+            Span::styled("  ·  ", Style::default().fg(palette::TEXT_MUTED)),
+            Span::styled(
+                format!("{} {} ", right.0, tr(self.locale, right.1)),
+                label_style,
+            ),
+            Span::raw(right.2.to_string()),
+        ])
+    }
+
+    fn guided_answer_single(&self, key: &str, label: MessageId, value: &str) -> Line<'static> {
+        Line::from(vec![
+            Span::styled(
+                format!("{key} {} ", tr(self.locale, label)),
+                Style::default()
+                    .fg(palette::TEXT_MUTED)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(value.to_string()),
+        ])
+    }
 }
 
 fn setup_report_ready(state: &SetupState) -> bool {
@@ -882,52 +1352,11 @@ fn setup_report_result(state: &SetupState) -> String {
 
 #[must_use]
 fn guided_constitution_template(locale: Locale) -> UserConstitution {
-    match locale {
-        Locale::ZhHans => UserConstitution {
-            language: Some(locale.tag().to_string()),
-            about: Some("希望 CodeWhale 成为稳健、重证据的工作台用户。".to_string()),
-            working_style: vec![
-                "保持改动聚焦，并简短说明重要取舍。".to_string(),
-                "在重要场景用命令、测试、截图或引用给出具体验证。".to_string(),
-                "保护密钥、用户文件、Git 历史、生产系统、成本、隐私和时间。".to_string(),
-            ],
-            priorities: vec![
-                "当前用户请求和实时工具证据优先于记忆、陈旧交接和猜测。".to_string(),
-                "遇到破坏性、高成本、凭据、发布、法律或安全风险操作时先询问。".to_string(),
-            ],
-            autonomy_preference: AutonomyPreference::Balanced,
-            notes: Some(
-                "这是用户全局常驻指导。自由文本只作为建议，不会改变审批、沙箱、Shell、网络、信任或 MCP 权限。"
-                    .to_string(),
-            ),
-            ..UserConstitution::default()
-        },
-        _ => UserConstitution {
-            language: Some(locale.tag().to_string()),
-            about: Some(
-                "A CodeWhale user who wants a calm, evidence-first coding workbench.".to_string(),
-            ),
-            working_style: vec![
-                "Keep changes scoped and explain important tradeoffs briefly.".to_string(),
-                "Prefer concrete verification with commands, tests, screenshots, or citations when they matter.".to_string(),
-                "Protect secrets, user files, git history, production systems, cost, privacy, and time.".to_string(),
-            ],
-            priorities: vec![
-                "Current user requests and live tool evidence outrank memory, stale handoffs, and guesses.".to_string(),
-                "Ask before destructive, high-cost, credential, publishing, legal, or security-risk actions.".to_string(),
-            ],
-            autonomy_preference: AutonomyPreference::Balanced,
-            notes: Some(
-                "Use this as user-global standing guidance. Freeform principles are advisory and do not change runtime approval, sandbox, shell, network, trust, or MCP permissions."
-                    .to_string(),
-            ),
-            ..UserConstitution::default()
-        },
-    }
+    GuidedConstitutionDraft::default().to_constitution(locale)
 }
 
-fn guided_constitution_preview_text(locale: Locale) -> String {
-    let constitution = guided_constitution_template(locale);
+fn guided_constitution_preview_text(locale: Locale, draft: GuidedConstitutionDraft) -> String {
+    let constitution = draft.to_constitution(locale);
     let intro = match locale {
         Locale::ZhHans => {
             "这是将要保存的用户全局宪法预览。关闭预览后再次按 G 保存，或返回设置选择内置/稍后。"
@@ -1213,6 +1642,87 @@ mod tests {
     }
 
     #[test]
+    fn guided_constitution_answers_shape_preview_and_saved_payload() {
+        let mut view = SetupWizardView::new(SetupState::default(), Locale::En);
+        for key_char in ['1', '2', '3', '4', '5'] {
+            assert!(matches!(
+                view.handle_key(key(KeyCode::Char(key_char))),
+                ViewAction::None
+            ));
+        }
+
+        let action = view.handle_key(key(KeyCode::Char('g')));
+
+        let ViewAction::Emit(ViewEvent::OpenTextPager { content, .. }) = action else {
+            panic!("expected tuned guided constitution preview event");
+        };
+        assert!(content.contains("current, cited research"));
+        assert!(content.contains("ambitious initiative"));
+        assert!(content.contains("release evidence"));
+        assert!(content.contains("learn the system"));
+        assert!(content.contains("sensitive data"));
+
+        let action = view.handle_key(key(KeyCode::Char('g')));
+
+        let ViewAction::EmitAndClose(ViewEvent::SetupConstitutionCommitRequested {
+            constitution,
+            state,
+            ..
+        }) = action
+        else {
+            panic!("expected tuned guided constitution commit event");
+        };
+        assert_eq!(
+            constitution.autonomy_preference,
+            AutonomyPreference::Autonomous
+        );
+        let body = constitution.render_body();
+        assert!(body.contains("current, cited research"));
+        assert!(body.contains("release evidence"));
+        assert!(body.contains("learn the system"));
+        assert!(body.contains("sensitive data"));
+        assert_eq!(
+            state.constitution_preview_hash.as_deref(),
+            Some(constitution.preview_hash().as_str())
+        );
+    }
+
+    #[test]
+    fn changing_guided_answer_requires_fresh_preview() {
+        let mut view = SetupWizardView::new(SetupState::default(), Locale::En);
+
+        let first_preview = view.handle_key(key(KeyCode::Char('g')));
+        assert!(matches!(
+            first_preview,
+            ViewAction::Emit(ViewEvent::OpenTextPager { .. })
+        ));
+
+        assert!(matches!(
+            view.handle_key(key(KeyCode::Char('2'))),
+            ViewAction::None
+        ));
+        let second_preview = view.handle_key(key(KeyCode::Char('g')));
+
+        let ViewAction::Emit(ViewEvent::OpenTextPager { content, .. }) = second_preview else {
+            panic!("changed guided answer should preview again before saving");
+        };
+        assert!(content.contains("ambitious initiative"));
+
+        let action = view.handle_key(key(KeyCode::Char('g')));
+        let ViewAction::EmitAndClose(ViewEvent::SetupConstitutionCommitRequested {
+            constitution,
+            ..
+        }) = action
+        else {
+            panic!("expected save after fresh preview");
+        };
+        assert_eq!(
+            constitution.autonomy_preference,
+            AutonomyPreference::Autonomous
+        );
+    }
+
+    #[test]
     fn guided_constitution_template_localizes_content() {
         let english = guided_constitution_template(Locale::En).render_body();
         let zh_hans = guided_constitution_template(Locale::ZhHans).render_body();
@@ -1224,8 +1734,10 @@ mod tests {
 
     #[test]
     fn guided_constitution_preview_uses_rendered_block_and_layer_order() {
-        let english = guided_constitution_preview_text(Locale::En);
-        let zh_hans = guided_constitution_preview_text(Locale::ZhHans);
+        let english =
+            guided_constitution_preview_text(Locale::En, GuidedConstitutionDraft::default());
+        let zh_hans =
+            guided_constitution_preview_text(Locale::ZhHans, GuidedConstitutionDraft::default());
 
         assert!(english.contains("<codewhale_user_constitution"));
         assert!(english.contains("Layer order"));
@@ -1233,6 +1745,23 @@ mod tests {
         assert!(zh_hans.contains("<codewhale_user_constitution"));
         assert!(zh_hans.contains("再次按 G 保存"));
         assert_ne!(english, zh_hans);
+    }
+
+    #[test]
+    fn guided_constitution_detail_lines_show_localized_answers() {
+        let english = SetupWizardView::new(SetupState::default(), Locale::En);
+        let english_text = lines_to_text(english.constitution_detail_lines());
+        assert!(english_text.contains("Purpose:"));
+        assert!(english_text.contains("coding workbench"));
+        assert!(english_text.contains("Initiative:"));
+        assert!(english_text.contains("balanced"));
+
+        let zh_hans = SetupWizardView::new(SetupState::default(), Locale::ZhHans);
+        let zh_hans_text = lines_to_text(zh_hans.constitution_detail_lines());
+        assert!(zh_hans_text.contains("用途："));
+        assert!(zh_hans_text.contains("编码工作台"));
+        assert!(zh_hans_text.contains("主动性："));
+        assert!(zh_hans_text.contains("平衡"));
     }
 
     #[test]

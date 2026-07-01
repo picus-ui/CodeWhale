@@ -77,8 +77,8 @@ impl AutonomyPreference {
                  confirm before risky, destructive, or ambiguous actions.",
             ),
             AutonomyPreference::Autonomous => Some(
-                "The user prefers you to proceed autonomously wherever it is safe, batching work \
-                 and surfacing decisions rather than pausing for routine confirmations.",
+                "The user prefers ambitious initiative wherever it is safe: batch routine work \
+                 and surface decisions rather than pausing for routine confirmations.",
             ),
         }
     }
