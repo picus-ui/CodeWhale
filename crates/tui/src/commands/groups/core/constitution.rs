@@ -18,7 +18,7 @@ use super::CommandResult;
 pub(in crate::commands) const COMMAND_INFO: CommandInfo = CommandInfo {
     name: "constitution",
     aliases: &["law"],
-    usage: "/constitution [status|preview|bundled|edit|review|repair|repo|explain|posture]",
+    usage: "/constitution [status|preview|bundled|edit|review|repair|repo|explain|posture|help]",
     description_id: MessageId::CmdConstitutionDescription,
 };
 
@@ -56,9 +56,12 @@ impl RegisterCommand for ConstitutionCmd {
                     step: SetupStep::Constitution,
                 })
             }
-            Some("repair" | "fix") => CommandResult::action(AppAction::OpenSetupWizardAt {
-                step: SetupStep::Constitution,
-            }),
+            Some("repair" | "fix") => CommandResult::with_message_and_action(
+                repair_text(app.ui_locale),
+                AppAction::OpenSetupWizardAt {
+                    step: SetupStep::Constitution,
+                },
+            ),
             Some("posture" | "runtime-posture") => {
                 CommandResult::action(AppAction::OpenSetupWizardAt {
                     step: SetupStep::TrustSandbox,
@@ -540,14 +543,82 @@ fn ignored_whale_warnings(warnings: &[String]) -> Vec<&str> {
 
 fn help_text(locale: Locale) -> String {
     match locale {
-        Locale::ZhHans => {
-            "用法：/constitution [status|preview|bundled|edit|review|repair|repo|explain|posture]"
-        }
-        _ => {
-            "Usage: /constitution [status|preview|bundled|edit|review|repair|repo|explain|posture]"
-        }
+        Locale::ZhHans => "\
+用法：/constitution [status|preview|bundled|edit|review|repair|repo|explain|posture|help]
+
+常用命令：
+- /constitution：打开宪法管理器和当前层级。
+- /constitution preview：显示会注入模型的确切用户全局宪法块；缺失、空、无效或不可读时显示修复说明。
+- /constitution edit：打开 /setup 的引导式宪法步骤；用 1-6 调整，按 G 预览，再按 G 保存。
+- /constitution repair：说明当前文件状态，然后打开同一个引导式修复步骤。
+- /constitution bundled：记录使用内置/默认准则，不创建自定义文件。
+- /constitution repo：查看 .codewhale/constitution.json 仓库本地准则。
+- /constitution explain：解释 Constitution、用户全局宪法、仓库宪法、AGENTS.md、记忆和交接的区别。
+- /constitution posture：打开运行时姿态；宪法只提供模型指导，不会更改批准、沙盒、Shell、网络、信任或 MCP 权限。",
+        _ => "\
+Usage: /constitution [status|preview|bundled|edit|review|repair|repo|explain|posture|help]
+
+Common commands:
+- /constitution: open the constitution manager and active stack.
+- /constitution preview: show the exact user-global constitution block that would be injected; missing, empty, invalid, or unreadable files show repair guidance instead.
+- /constitution edit: open the guided /setup Constitution step; tune 1-6, press G to preview, then G again to save.
+- /constitution repair: explain the current file state, then open the same guided repair step.
+- /constitution bundled: record bundled/default law without creating a custom file.
+- /constitution repo: inspect repo-local .codewhale/constitution.json law.
+- /constitution explain: compare Constitution, user-global law, repo law, AGENTS.md, memory, and handoff.
+- /constitution posture: open runtime posture; constitution text is model guidance only and does not change approvals, sandbox, shell, network, trust, or MCP permissions.",
     }
     .to_string()
+}
+
+fn repair_text(locale: Locale) -> String {
+    let state = load_setup_state();
+    let load = load_user_constitution();
+    let file = user_constitution_file_label(&load, locale);
+    let choice = state.as_ref().map_or(
+        match locale {
+            Locale::ZhHans => "未记录",
+            _ => "not recorded",
+        },
+        |s| choice_label(s.constitution_choice, locale),
+    );
+    let validity = validity_label(load.validity_for_display(state.as_ref()), locale);
+    let status = user_constitution_stack_status(state.as_ref(), &load, locale);
+
+    match locale {
+        Locale::ZhHans => format!(
+            "\
+用户全局宪法修复
+
+当前文件：{file}
+当前状态：{status}
+记录选择：{choice}
+有效性：{validity}
+
+接下来将打开 /setup 的宪法步骤。安全修复路径：
+- 用 1-6 调整引导式草稿，按 G 预览，再按 G 保存新的结构化 constitution.json。
+- 按 U 或运行 /constitution bundled 记录使用内置/默认准则；现有无效/空/不可读文件不会被注入。
+- 用 /constitution preview 查看当前错误或渲染结果。
+
+这只处理用户全局 constitution.json。运行时批准、沙盒、Shell、网络、信任、默认模式和 MCP 权限仍由运行时姿态/配置控制。"
+        ),
+        _ => format!(
+            "\
+User-global constitution repair
+
+Current file: {file}
+Current state: {status}
+Recorded choice: {choice}
+Validity: {validity}
+
+Opening the /setup Constitution step next. Safe repair paths:
+- Tune the guided draft with 1-6, press G to preview, then G again to save a fresh structured constitution.json.
+- Press U or run /constitution bundled to record bundled/default law; the existing invalid/empty/unreadable file will not be injected.
+- Use /constitution preview to inspect the current error or rendered result.
+
+This only repairs the user-global constitution.json. Runtime approval, sandbox, shell, network, trust, default mode, and MCP authority still belong to runtime posture/config."
+        ),
+    }
 }
 
 fn manager_title(locale: Locale) -> &'static str {
@@ -948,6 +1019,47 @@ mod tests {
                 step: SetupStep::Constitution
             })
         );
+    }
+
+    #[test]
+    fn constitution_help_lists_repair_and_runtime_boundary() {
+        let mut app = test_app();
+
+        let result = ConstitutionCmd::execute(&mut app, Some("help"));
+
+        let message = result.message.expect("help message");
+        assert!(message.contains("Usage: /constitution"));
+        assert!(message.contains("/constitution repair"));
+        assert!(message.contains("/constitution posture"));
+        assert!(message.contains("model guidance only"));
+        assert!(message.contains("does not change approvals"));
+    }
+
+    #[test]
+    fn constitution_repair_explains_invalid_file_and_opens_setup() {
+        let _env_guard = crate::test_support::lock_test_env();
+        let tmp = tempdir().expect("tempdir");
+        let home = tmp.path().join("codewhale-home");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::write(home.join("constitution.json"), "{not valid json").expect("invalid file");
+        let _home = crate::test_support::EnvVarGuard::set("CODEWHALE_HOME", home.as_os_str());
+        let mut app = test_app();
+
+        let result = ConstitutionCmd::execute(&mut app, Some("repair"));
+
+        assert_eq!(
+            result.action,
+            Some(AppAction::OpenSetupWizardAt {
+                step: SetupStep::Constitution
+            })
+        );
+        let message = result.message.expect("repair message");
+        assert!(message.contains("User-global constitution repair"));
+        assert!(message.contains("Current state: invalid; repair recommended"));
+        assert!(message.contains("Validity: invalid"));
+        assert!(message.contains("constitution.json"));
+        assert!(message.contains("will not be injected"));
+        assert!(message.contains("Runtime approval"));
     }
 
     #[test]
