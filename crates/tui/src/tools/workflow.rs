@@ -11,8 +11,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use codewhale_whaleflow::{
-    AgentType, BranchSpec, BudgetSpec, IsolationMode, LeafSpec, ReduceSpec, SequenceSpec, TaskMode,
-    WorkflowNode, WorkflowSpec, compile_javascript_workflow, compile_typescript_workflow,
+    AgentType, BranchResult, BranchSpec, BudgetSpec, ControlNodeKind, ControlNodeResult,
+    IsolationMode, LeafResult, LeafSpec, ReduceSpec, SequenceSpec, TaskMode,
+    WorkflowExecution as IrWorkflowExecution, WorkflowMemoUsage, WorkflowNode,
+    WorkflowRunStatus as IrWorkflowRunStatus, WorkflowSpec, WorkflowUsage,
+    compile_javascript_workflow, compile_typescript_workflow,
 };
 use codewhale_whaleflow_js::{
     BudgetSnapshot, DriverError, ProgressEvent, SpawnedTask, TaskCompletion, TaskRequest,
@@ -62,25 +65,36 @@ struct WorkflowRunRecord {
     started_at_ms: u64,
     completed_at_ms: Option<u64>,
     source_path: Option<PathBuf>,
+    workflow_id: Option<String>,
+    workflow_goal: Option<String>,
     token_budget: Option<u64>,
     child_ids: Vec<String>,
     progress: Vec<String>,
     result: Option<Value>,
+    execution: Option<IrWorkflowExecution>,
     error: Option<String>,
 }
 
 impl WorkflowRunRecord {
-    fn new(run_id: String, source_path: Option<PathBuf>, token_budget: Option<u64>) -> Self {
+    fn new(
+        run_id: String,
+        source_path: Option<PathBuf>,
+        token_budget: Option<u64>,
+        spec: Option<&WorkflowSpec>,
+    ) -> Self {
         Self {
             run_id,
             status: WorkflowRunStatus::Running,
             started_at_ms: now_ms(),
             completed_at_ms: None,
             source_path,
+            workflow_id: spec.and_then(|spec| spec.id.clone()),
+            workflow_goal: spec.map(|spec| spec.goal.clone()),
             token_budget,
             child_ids: Vec::new(),
             progress: Vec::new(),
             result: None,
+            execution: None,
             error: None,
         }
     }
@@ -256,7 +270,12 @@ async fn start_workflow(
         let mut runs_guard = lock_mutex(&runs)?;
         runs_guard.insert(
             run_id.clone(),
-            WorkflowRunRecord::new(run_id.clone(), source.path.clone(), token_budget),
+            WorkflowRunRecord::new(
+                run_id.clone(),
+                source.path.clone(),
+                token_budget,
+                source.spec.as_ref(),
+            ),
         );
     }
 
@@ -270,6 +289,7 @@ async fn start_workflow(
     let run = run_workflow_vm(
         run_id.clone(),
         source.source,
+        source.spec,
         args,
         driver,
         runs.clone(),
@@ -330,6 +350,7 @@ async fn cancel_workflow(
 async fn run_workflow_vm(
     run_id: String,
     source: String,
+    spec: Option<WorkflowSpec>,
     args: Value,
     driver: Arc<SubAgentWorkflowDriver>,
     runs: SharedWorkflowRuns,
@@ -354,6 +375,9 @@ async fn run_workflow_vm(
                 record.status = status;
                 record.result = output;
                 record.error = error;
+                record.execution = spec.as_ref().map(|spec| {
+                    execution_from_declarative_spec(spec, driver.task_records_snapshot(), status)
+                });
                 record.completed_at_ms = Some(now_ms());
             }
         }
@@ -385,6 +409,7 @@ fn workflow_result_for(run_id: &str, runs: SharedWorkflowRuns) -> Result<ToolRes
 struct WorkflowSource {
     source: String,
     path: Option<PathBuf>,
+    spec: Option<WorkflowSpec>,
 }
 
 fn workflow_source(input: &Value, context: &ToolContext) -> Result<WorkflowSource, ToolError> {
@@ -442,13 +467,28 @@ fn workflow_source_from_raw(
     source: String,
     path: Option<PathBuf>,
 ) -> Result<WorkflowSource, ToolError> {
-    let source = adapt_workflow_source(&source, path.as_deref())?;
-    Ok(WorkflowSource { source, path })
+    let adapted = adapt_workflow_source(&source, path.as_deref())?;
+    Ok(WorkflowSource {
+        source: adapted.source,
+        path,
+        spec: adapted.spec,
+    })
 }
 
-fn adapt_workflow_source(source: &str, path: Option<&Path>) -> Result<String, ToolError> {
+struct AdaptedWorkflowSource {
+    source: String,
+    spec: Option<WorkflowSpec>,
+}
+
+fn adapt_workflow_source(
+    source: &str,
+    path: Option<&Path>,
+) -> Result<AdaptedWorkflowSource, ToolError> {
     if !looks_like_declarative_workflow(source) {
-        return Ok(source.to_string());
+        return Ok(AdaptedWorkflowSource {
+            source: source.to_string(),
+            spec: None,
+        });
     }
 
     let identifier = path
@@ -469,7 +509,11 @@ fn adapt_workflow_source(source: &str, path: Option<&Path>) -> Result<String, To
         ))
     })?;
 
-    lower_declarative_workflow_to_imperative_js(&spec)
+    let lowered = lower_declarative_workflow_to_imperative_js(&spec)?;
+    Ok(AdaptedWorkflowSource {
+        source: lowered,
+        spec: Some(spec),
+    })
 }
 
 fn looks_like_declarative_workflow(source: &str) -> bool {
@@ -831,6 +875,14 @@ fn task_mode_name(mode: TaskMode) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeTaskRecord {
+    agent_id: String,
+    label: Option<String>,
+    status: IrWorkflowRunStatus,
+    output: Option<String>,
+}
+
 struct SubAgentWorkflowDriver {
     run_id: String,
     manager: SharedSubAgentManager,
@@ -839,6 +891,7 @@ struct SubAgentWorkflowDriver {
     completion_tx: mpsc::UnboundedSender<SubAgentCompletion>,
     completion_state: Arc<Mutex<CompletionState>>,
     child_ids: Arc<Mutex<Vec<String>>>,
+    task_records: Arc<Mutex<HashMap<String, RuntimeTaskRecord>>>,
     total_budget: Option<u64>,
     spent_budget: AtomicU64,
 }
@@ -860,6 +913,7 @@ impl SubAgentWorkflowDriver {
             completion_tx,
             completion_state: Arc::new(Mutex::new(CompletionState::default())),
             child_ids: Arc::new(Mutex::new(Vec::new())),
+            task_records: Arc::new(Mutex::new(HashMap::new())),
             total_budget,
             spent_budget: AtomicU64::new(0),
         });
@@ -895,6 +949,56 @@ impl SubAgentWorkflowDriver {
         }
     }
 
+    fn record_task_request(&self, agent_id: &str, request: &TaskRequest) {
+        if let Ok(mut records) = self.task_records.lock() {
+            records.insert(
+                agent_id.to_string(),
+                RuntimeTaskRecord {
+                    agent_id: agent_id.to_string(),
+                    label: request.label.clone(),
+                    status: IrWorkflowRunStatus::Running,
+                    output: None,
+                },
+            );
+        }
+        let pending_completion = self
+            .completion_state
+            .lock()
+            .ok()
+            .and_then(|state| state.pending.get(agent_id).cloned());
+        if let Some(completion) = pending_completion {
+            self.record_task_completion(agent_id, &completion);
+        }
+    }
+
+    fn record_task_completion(&self, agent_id: &str, completion: &TaskCompletion) {
+        if let Ok(mut records) = self.task_records.lock()
+            && let Some(record) = records.get_mut(agent_id)
+        {
+            let (status, output) = match completion {
+                TaskCompletion::Completed { text } => {
+                    (IrWorkflowRunStatus::Succeeded, Some(text.clone()))
+                }
+                TaskCompletion::Failed { message } => {
+                    (IrWorkflowRunStatus::Failed, Some(message.clone()))
+                }
+                TaskCompletion::Cancelled => (IrWorkflowRunStatus::Cancelled, None),
+                TaskCompletion::BudgetExhausted { message } => {
+                    (IrWorkflowRunStatus::BudgetExceeded, Some(message.clone()))
+                }
+            };
+            record.status = status;
+            record.output = output;
+        }
+    }
+
+    fn task_records_snapshot(&self) -> Vec<RuntimeTaskRecord> {
+        self.task_records
+            .lock()
+            .map(|records| records.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     fn add_waiter_or_complete(&self, agent_id: String, waiter: oneshot::Sender<TaskCompletion>) {
         let mut state = self
             .completion_state
@@ -908,6 +1012,7 @@ impl SubAgentWorkflowDriver {
     }
 
     fn deliver_completion(&self, agent_id: String, completion: TaskCompletion) {
+        self.record_task_completion(&agent_id, &completion);
         let mut state = self
             .completion_state
             .lock()
@@ -933,11 +1038,13 @@ impl WorkflowDriver for SubAgentWorkflowDriver {
             .runtime
             .clone()
             .with_parent_completion_tx(self.completion_tx.clone());
+        let request_record = request.clone();
         let result = spawn_workflow_task(request, self.manager.clone(), runtime)
             .await
             .map_err(|err| DriverError::Rejected(err.to_string()))?;
         let task_id = result.agent_id.clone();
         self.record_child(&task_id);
+        self.record_task_request(&task_id, &request_record);
         let (tx, rx) = oneshot::channel();
         self.add_waiter_or_complete(task_id.clone(), tx);
         Ok(SpawnedTask {
@@ -967,6 +1074,258 @@ impl WorkflowDriver for SubAgentWorkflowDriver {
         {
             record.progress.push(message);
         }
+    }
+}
+
+fn execution_from_declarative_spec(
+    spec: &WorkflowSpec,
+    records: Vec<RuntimeTaskRecord>,
+    terminal_status: WorkflowRunStatus,
+) -> IrWorkflowExecution {
+    let by_label = records
+        .into_iter()
+        .filter_map(|record| record.label.clone().map(|label| (label, record)))
+        .collect::<HashMap<_, _>>();
+    let mut execution = IrWorkflowExecution::default();
+    for node in &spec.nodes {
+        push_execution_node(node, &by_label, &mut execution);
+    }
+    match terminal_status {
+        WorkflowRunStatus::Completed => {}
+        WorkflowRunStatus::Failed => mark_ir_status(&mut execution, IrWorkflowRunStatus::Failed),
+        WorkflowRunStatus::Cancelled => {
+            mark_ir_status(&mut execution, IrWorkflowRunStatus::Cancelled);
+        }
+        WorkflowRunStatus::Running => {
+            execution.status = IrWorkflowRunStatus::Running;
+        }
+    }
+    execution
+}
+
+fn push_execution_node(
+    node: &WorkflowNode,
+    records: &HashMap<String, RuntimeTaskRecord>,
+    execution: &mut IrWorkflowExecution,
+) {
+    match node {
+        WorkflowNode::Leaf(spec) => push_leaf_execution(spec, records, execution),
+        WorkflowNode::BranchSet(spec) => push_branch_execution(spec, records, execution),
+        WorkflowNode::Sequence(spec) => push_sequence_execution(spec, records, execution),
+        WorkflowNode::Reduce(spec) => push_control_execution(
+            spec.id.as_str(),
+            ControlNodeKind::Reduce,
+            records.get(&spec.id),
+            spec.inputs.clone(),
+            Some(spec.prompt.clone()),
+            execution,
+        ),
+        WorkflowNode::TeacherReview(spec) => push_control_execution(
+            spec.id.as_str(),
+            ControlNodeKind::TeacherReview,
+            records.get(&spec.id),
+            spec.candidates.clone(),
+            Some("teacher review not lowered by the production adapter".to_string()),
+            execution,
+        ),
+        WorkflowNode::LoopUntil(spec) => push_control_execution(
+            spec.id.as_str(),
+            ControlNodeKind::LoopUntil,
+            records.get(&spec.id),
+            spec.children.iter().map(declarative_node_id).collect(),
+            Some("loop_until not lowered by the production adapter".to_string()),
+            execution,
+        ),
+        WorkflowNode::Cond(spec) => push_control_execution(
+            spec.id.as_str(),
+            ControlNodeKind::Cond,
+            records.get(&spec.id),
+            spec.then_nodes
+                .iter()
+                .chain(spec.else_nodes.iter())
+                .map(declarative_node_id)
+                .collect(),
+            Some("cond not lowered by the production adapter".to_string()),
+            execution,
+        ),
+        WorkflowNode::Expand(spec) => push_control_execution(
+            spec.id.as_str(),
+            ControlNodeKind::Expand,
+            records.get(&spec.id),
+            Vec::new(),
+            Some(format!("expand not lowered from {}", spec.source)),
+            execution,
+        ),
+    }
+}
+
+fn push_leaf_execution(
+    spec: &LeafSpec,
+    records: &HashMap<String, RuntimeTaskRecord>,
+    execution: &mut IrWorkflowExecution,
+) {
+    let record = records.get(&spec.id);
+    let status = record
+        .map(|record| record.status)
+        .unwrap_or(IrWorkflowRunStatus::Pending);
+    mark_ir_status(execution, status);
+    execution.leaf_results.push(LeafResult {
+        leaf_id: spec.id.clone(),
+        task_id: record
+            .map(|record| record.agent_id.clone())
+            .unwrap_or_else(|| spec.id.clone()),
+        profile: spec.profile.clone(),
+        status,
+        usage: WorkflowUsage::default(),
+        memo_usage: WorkflowMemoUsage::default(),
+        output: record.and_then(|record| record.output.clone()),
+        artifacts: Vec::new(),
+    });
+}
+
+fn push_branch_execution(
+    spec: &BranchSpec,
+    records: &HashMap<String, RuntimeTaskRecord>,
+    execution: &mut IrWorkflowExecution,
+) {
+    let before = execution.leaf_results.len();
+    for child in &spec.children {
+        push_execution_node(child, records, execution);
+    }
+    let status = aggregate_ir_status(
+        execution.leaf_results[before..]
+            .iter()
+            .map(|result| result.status),
+    );
+    mark_ir_status(execution, status);
+    execution.branch_results.push(BranchResult {
+        branch_id: spec.id.clone(),
+        task_id: spec.id.clone(),
+        status,
+        usage: WorkflowUsage::default(),
+        memo_usage: WorkflowMemoUsage::default(),
+        artifacts: Vec::new(),
+        notes: Some("production driver branch receipt from child task outcomes".to_string()),
+    });
+    execution.control_node_results.push(ControlNodeResult {
+        node_id: spec.id.clone(),
+        kind: ControlNodeKind::BranchSet,
+        status,
+        selected_children: spec.children.iter().map(declarative_node_id).collect(),
+        summary: Some("branch set lowered into production child tasks".to_string()),
+    });
+}
+
+fn push_sequence_execution(
+    spec: &SequenceSpec,
+    records: &HashMap<String, RuntimeTaskRecord>,
+    execution: &mut IrWorkflowExecution,
+) {
+    let before_leaf = execution.leaf_results.len();
+    let before_control = execution.control_node_results.len();
+    for child in &spec.children {
+        push_execution_node(child, records, execution);
+    }
+    let status = aggregate_ir_status(
+        execution.leaf_results[before_leaf..]
+            .iter()
+            .map(|result| result.status)
+            .chain(
+                execution.control_node_results[before_control..]
+                    .iter()
+                    .map(|result| result.status),
+            ),
+    );
+    mark_ir_status(execution, status);
+    execution.control_node_results.push(ControlNodeResult {
+        node_id: spec.id.clone(),
+        kind: ControlNodeKind::Sequence,
+        status,
+        selected_children: spec.children.iter().map(declarative_node_id).collect(),
+        summary: Some("sequence lowered in declaration order".to_string()),
+    });
+}
+
+fn push_control_execution(
+    node_id: &str,
+    kind: ControlNodeKind,
+    record: Option<&RuntimeTaskRecord>,
+    selected_children: Vec<String>,
+    fallback_summary: Option<String>,
+    execution: &mut IrWorkflowExecution,
+) {
+    let status = record
+        .map(|record| record.status)
+        .unwrap_or(IrWorkflowRunStatus::Pending);
+    mark_ir_status(execution, status);
+    execution.control_node_results.push(ControlNodeResult {
+        node_id: node_id.to_string(),
+        kind,
+        status,
+        selected_children,
+        summary: record
+            .and_then(|record| record.output.clone())
+            .or(fallback_summary),
+    });
+}
+
+fn aggregate_ir_status(
+    statuses: impl IntoIterator<Item = IrWorkflowRunStatus>,
+) -> IrWorkflowRunStatus {
+    let mut saw_pending = false;
+    let mut saw_running = false;
+    for status in statuses {
+        match status {
+            IrWorkflowRunStatus::BudgetExceeded => return IrWorkflowRunStatus::BudgetExceeded,
+            IrWorkflowRunStatus::Cancelled => return IrWorkflowRunStatus::Cancelled,
+            IrWorkflowRunStatus::Failed | IrWorkflowRunStatus::ReplayDiverged => {
+                return IrWorkflowRunStatus::Failed;
+            }
+            IrWorkflowRunStatus::Running => saw_running = true,
+            IrWorkflowRunStatus::Pending => saw_pending = true,
+            IrWorkflowRunStatus::Succeeded => {}
+        }
+    }
+    if saw_running {
+        IrWorkflowRunStatus::Running
+    } else if saw_pending {
+        IrWorkflowRunStatus::Pending
+    } else {
+        IrWorkflowRunStatus::Succeeded
+    }
+}
+
+fn mark_ir_status(execution: &mut IrWorkflowExecution, status: IrWorkflowRunStatus) {
+    match status {
+        IrWorkflowRunStatus::Failed | IrWorkflowRunStatus::ReplayDiverged => {
+            execution.mark_failed()
+        }
+        IrWorkflowRunStatus::Cancelled => execution.mark_cancelled(),
+        IrWorkflowRunStatus::BudgetExceeded => execution.mark_budget_exceeded(),
+        IrWorkflowRunStatus::Running => {
+            if execution.status == IrWorkflowRunStatus::Succeeded {
+                execution.status = IrWorkflowRunStatus::Running;
+            }
+        }
+        IrWorkflowRunStatus::Pending => {
+            if execution.status == IrWorkflowRunStatus::Succeeded {
+                execution.status = IrWorkflowRunStatus::Pending;
+            }
+        }
+        IrWorkflowRunStatus::Succeeded => {}
+    }
+}
+
+fn declarative_node_id(node: &WorkflowNode) -> String {
+    match node {
+        WorkflowNode::BranchSet(spec) => spec.id.clone(),
+        WorkflowNode::Leaf(spec) => spec.id.clone(),
+        WorkflowNode::Sequence(spec) => spec.id.clone(),
+        WorkflowNode::Reduce(spec) => spec.id.clone(),
+        WorkflowNode::TeacherReview(spec) => spec.id.clone(),
+        WorkflowNode::LoopUntil(spec) => spec.id.clone(),
+        WorkflowNode::Cond(spec) => spec.id.clone(),
+        WorkflowNode::Expand(spec) => spec.id.clone(),
     }
 }
 
@@ -1252,6 +1611,7 @@ mod tests {
             payload["error"]
         );
         assert!(payload["result"].is_null());
+        assert_eq!(payload["execution"]["status"], "failed");
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
@@ -1303,6 +1663,15 @@ mod tests {
         let payload: Value = serde_json::from_str(&result.content).expect("json result");
 
         assert_eq!(payload["status"], "completed");
+        assert_eq!(payload["execution"]["status"], "succeeded");
+        assert_eq!(
+            payload["execution"]["leaf_results"][0]["output"],
+            "upstream-output"
+        );
+        assert_eq!(
+            payload["execution"]["leaf_results"][1]["output"],
+            "upstream-output"
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         let bodies = bodies.lock().expect("captured bodies");
         let second_body = bodies.get(1).expect("second provider call").to_string();
@@ -1353,6 +1722,27 @@ mod tests {
         assert_eq!(payload["result"]["test-audit"], "audited");
         assert_eq!(payload["result"]["docs-audit"], "audited");
         assert_eq!(payload["result"]["synthesize-release-risk"], "audited");
+        assert_eq!(payload["execution"]["status"], "succeeded");
+        assert_eq!(
+            payload["execution"]["leaf_results"]
+                .as_array()
+                .expect("leaf results")
+                .len(),
+            3
+        );
+        assert_eq!(
+            payload["execution"]["branch_results"][0]["branch_id"],
+            "parallel-audit"
+        );
+        assert!(
+            payload["execution"]["control_node_results"]
+                .as_array()
+                .expect("control results")
+                .iter()
+                .any(|result| result["node_id"] == "synthesize-release-risk"
+                    && result["kind"] == "reduce"
+                    && result["status"] == "succeeded")
+        );
         assert_eq!(payload["child_ids"].as_array().unwrap().len(), 4);
         assert_eq!(calls.load(Ordering::SeqCst), 4);
         assert!(
