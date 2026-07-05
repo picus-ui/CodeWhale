@@ -2394,6 +2394,27 @@ esac
                 route.source, "resolver",
                 "receipt {key} resolved-route source must be the resolver"
             );
+            assert!(
+                route
+                    .model_route
+                    .as_deref()
+                    .is_some_and(|route| !route.is_empty()),
+                "receipt {key} resolved-route should record the model route seam"
+            );
+            assert!(
+                route
+                    .role_source
+                    .as_deref()
+                    .is_some_and(|source| !source.is_empty()),
+                "receipt {key} resolved-route should record role source"
+            );
+            assert!(
+                route
+                    .model_source
+                    .as_deref()
+                    .is_some_and(|source| !source.is_empty()),
+                "receipt {key} resolved-route should record model source"
+            );
 
             let receipt_json = serde_json::to_string(receipt).unwrap();
             let haystack = receipt_json.to_ascii_lowercase();
