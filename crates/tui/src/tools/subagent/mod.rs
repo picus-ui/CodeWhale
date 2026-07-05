@@ -4020,6 +4020,45 @@ async fn spawn_subagent_from_input(
     Ok(result)
 }
 
+/// Spawn one Workflow `task(...)` through the same path as the public `agent`
+/// tool. Keeping this adapter inside the sub-agent module prevents the
+/// Workflow driver from copying Fleet roster/profile/depth/budget semantics.
+pub(crate) async fn spawn_workflow_task(
+    request: codewhale_whaleflow_js::TaskRequest,
+    manager: SharedSubAgentManager,
+    runtime: SubAgentRuntime,
+) -> Result<SubAgentResult, ToolError> {
+    let mut input = json!({
+        "prompt": request.description,
+        "worktree": request.worktree,
+    });
+    if let Some(value) = request.subagent_type {
+        input["type"] = json!(value);
+    }
+    if let Some(value) = request.profile {
+        input["profile"] = json!(value);
+    }
+    if let Some(value) = request.model {
+        input["model"] = json!(value);
+    }
+    if let Some(value) = request.model_strength {
+        input["model_strength"] = json!(value);
+    }
+    if let Some(value) = request.thinking {
+        input["thinking"] = json!(value);
+    }
+    if let Some(value) = request.allowed_tools {
+        input["allowed_tools"] = json!(value);
+    }
+    if let Some(value) = request.max_depth {
+        input["max_depth"] = json!(value);
+    }
+    if let Some(value) = request.token_budget {
+        input["token_budget"] = json!(value);
+    }
+    spawn_subagent_from_input(input, manager, runtime).await
+}
+
 // === Sub-agent Execution ===
 
 /// Build the system prompt for a sub-agent.

@@ -1155,8 +1155,13 @@ impl ToolRegistryBuilder {
         runtime: super::subagent::SubAgentRuntime,
     ) -> Self {
         use super::subagent::AgentTool;
+        use super::workflow::WorkflowTool;
 
-        self.with_tool(Arc::new(AgentTool::new(manager, runtime)))
+        self.with_tool(Arc::new(WorkflowTool::new(
+            Arc::clone(&manager),
+            runtime.clone(),
+        )))
+        .with_tool(Arc::new(AgentTool::new(manager, runtime)))
     }
 
     /// Build the registry with the given context.
