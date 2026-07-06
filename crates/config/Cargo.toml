@@ -8,10 +8,10 @@ description = "Config schema and precedence model for CodeWhale"
 
 [dependencies]
 anyhow.workspace = true
-codewhale-execpolicy = { path = "../execpolicy", version = "0.8.66" }
-codewhale-secrets = { path = "../secrets", version = "0.8.66" }
+codewhale-execpolicy.workspace = true
+codewhale-secrets.workspace = true
 dirs.workspace = true
-libc = "0.2"
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

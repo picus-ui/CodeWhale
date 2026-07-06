@@ -8,5 +8,5 @@ description = "Execution policy and approval model for CodeWhale"
 
 [dependencies]
 anyhow.workspace = true
-codewhale-protocol = { path = "../protocol", version = "0.8.66" }
+codewhale-protocol.workspace = true
 serde.workspace = true

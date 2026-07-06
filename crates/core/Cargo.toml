@@ -9,14 +9,14 @@ description = "Core runtime boundaries for CodeWhale"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-codewhale-agent = { path = "../agent", version = "0.8.66" }
-codewhale-config = { path = "../config", version = "0.8.66" }
-codewhale-execpolicy = { path = "../execpolicy", version = "0.8.66" }
-codewhale-hooks = { path = "../hooks", version = "0.8.66" }
-codewhale-mcp = { path = "../mcp", version = "0.8.66" }
-codewhale-protocol = { path = "../protocol", version = "0.8.66" }
-codewhale-state = { path = "../state", version = "0.8.66" }
-codewhale-tools = { path = "../tools", version = "0.8.66" }
+codewhale-agent.workspace = true
+codewhale-config.workspace = true
+codewhale-execpolicy.workspace = true
+codewhale-hooks.workspace = true
+codewhale-mcp.workspace = true
+codewhale-protocol.workspace = true
+codewhale-state.workspace = true
+codewhale-tools.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 uuid.workspace = true
