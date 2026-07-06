@@ -691,13 +691,15 @@ impl AutomationManager {
     }
 
     /// Persist a completed enqueue attempt and advance the schedule slot.
-    /// Skips silently when the automation was deleted while the enqueue await
-    /// ran outside the lock.
+    /// The run record is saved unconditionally: `enqueue_run_task` already
+    /// created a real task before this is called, so even when the automation
+    /// was deleted while the enqueue await ran outside the lock, the run must
+    /// be persisted (not orphaned) — only the schedule advance is skipped.
     fn finish_scheduled_run(&self, run: &AutomationRunRecord, now: DateTime<Utc>) -> Result<()> {
+        self.save_run(run)?;
         let Ok(mut automation) = self.get_automation(&run.automation_id) else {
             return Ok(());
         };
-        self.save_run(run)?;
         let schedule = AutomationSchedule::parse_rrule(&automation.rrule)?;
         automation.updated_at = now;
         automation.next_run_at = Some(schedule.next_after(run.scheduled_for)?);
@@ -1451,6 +1453,35 @@ mod tests {
         assert!(has_sortable_run_stem(expected.trim_end_matches(".json")));
         // Legacy uuid stems are not mistaken for sortable names.
         assert!(!has_sortable_run_stem(&run.id));
+    }
+
+    #[test]
+    fn finish_scheduled_run_persists_run_when_automation_deleted_mid_enqueue() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let manager = AutomationManager::open(tempdir.path().to_path_buf()).expect("manager");
+        let automation = automation_record_with_settings(None, None, None, None);
+        manager.save_automation(&automation).expect("save");
+        let run = queued_run_for(&automation);
+
+        // Simulate the automation being deleted while the enqueue await ran
+        // outside the lock. The task already exists in the task manager at
+        // this point, so the run record must still be persisted — an early
+        // return here orphans a real running task.
+        manager.delete_automation(&automation.id).expect("delete");
+        manager
+            .finish_scheduled_run(&run, Utc::now())
+            .expect("finish");
+
+        let runs = manager.list_runs(&automation.id, None).expect("list runs");
+        assert_eq!(
+            runs.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec![run.id.as_str()],
+            "run must be persisted even though its automation was deleted"
+        );
+        assert!(
+            manager.get_automation(&automation.id).is_err(),
+            "the deleted automation must not be resurrected"
+        );
     }
 
     #[test]
