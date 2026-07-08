@@ -3966,6 +3966,53 @@ base_url = "https://api.xiaomimimo.com/v1"
     }
 
     #[test]
+    fn config_view_bottom_hint_semantically_truncates_at_narrow_width() {
+        // The dense bottom status line must truncate on a word boundary with an
+        // ellipsis instead of leaving a mid-word fragment clipped by the
+        // terminal (#3987).
+        let app = create_test_app();
+        let mut view = ConfigView::new_for_app(&app);
+        view.status = Some(
+            "CFGSTATUS persisted the configuration override to disk successfully \
+             without clipping the trailing MARKEREND status text"
+                .to_string(),
+        );
+
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+
+        let rows: Vec<String> = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect();
+
+        // No rendered row may overflow the available columns.
+        for (idx, row) in rows.iter().enumerate() {
+            assert!(
+                crate::tui::ui_text::text_display_width(row) <= usize::from(area.width),
+                "line {idx} overflows: {row:?}"
+            );
+        }
+
+        let status_line = rows
+            .iter()
+            .find(|row| row.contains("CFGSTATUS"))
+            .expect("bottom status hint should be rendered");
+        assert!(
+            status_line.contains('…'),
+            "status should be truncated with an ellipsis: {status_line:?}"
+        );
+        assert!(
+            !status_line.contains("MARKEREND"),
+            "truncated status must drop trailing text: {status_line:?}"
+        );
+    }
+
+    #[test]
     fn config_view_typing_replaces_on_first_char() {
         let app = create_test_app();
         let mut view = ConfigView::new_for_app(&app);
