@@ -594,27 +594,34 @@ fn normalize_skill_name_for_lookup(name: &str) -> String {
 }
 
 /// Resolve every candidate skills directory for a workspace, in
-/// precedence order — most specific first. Used for session-time
-/// skill discovery so the model sees skills that originated in
-/// other AI-tool conventions installed in the same workspace
-/// (#432).
+/// precedence order — most specific first. Walks up from `workspace`
+/// through all ancestor directories to find skills at every level,
+/// so a monorepo root or parent project can contribute skills to
+/// nested subdirectories. Used for session-time skill discovery so
+/// the model sees skills that originated in other AI-tool conventions
+/// installed in the same workspace or any ancestor (#432).
 ///
-/// Precedence (first match wins on name conflicts):
+/// Precedence within each ancestor directory, closest first
+/// (first match wins on name conflicts):
 ///
-/// 1. `<workspace>/.agents/skills` — deepseek-native convention.
-/// 2. `<workspace>/skills` — flat, project-local.
-/// 3. `<workspace>/.opencode/skills` — OpenCode interop.
-/// 4. `<workspace>/.claude/skills` — Claude Code interop.
-/// 5. `<workspace>/.cursor/skills` — Cursor interop.
-/// 6. `<workspace>/.codewhale/skills` — CodeWhale workspace skills.
+/// 1. `<ancestor>/.agents/skills` — deepseek-native convention.
+/// 2. `<ancestor>/skills` — flat, project-local.
+/// 3. `<ancestor>/.opencode/skills` — OpenCode interop.
+/// 4. `<ancestor>/.claude/skills` — Claude Code interop.
+/// 5. `<ancestor>/.cursor/skills` — Cursor interop.
+/// 6. `<ancestor>/.codewhale/skills` — CodeWhale workspace skills.
+///
+/// After all ancestors, global directories:
+///
 /// 7. [`agents_global_skills_dir`] — agentskills.io global.
 /// 8. `~/.claude/skills` — Claude-ecosystem global (#902).
 /// 9. `~/.codewhale/skills` — CodeWhale global, primary install target.
 /// 10. `~/.deepseek/skills` — legacy DeepSeek global fallback.
 ///
-/// Only directories that exist on disk are returned — callers don't
-/// need to filter further. Returns an empty vec when nothing is
-/// installed (the system-prompt skills block is then suppressed).
+/// Ancestor walk stops at the filesystem root. Only directories that
+/// exist on disk are returned — callers don't need to filter further.
+/// Returns an empty vec when nothing is installed (the system-prompt
+/// skills block is then suppressed).
 #[must_use]
 #[allow(dead_code)]
 pub fn skills_directories(workspace: &Path) -> Vec<PathBuf> {
@@ -632,19 +639,33 @@ fn skills_directories_with_home_and_mode(
     home_dir: Option<&Path>,
     mode: SkillDiscoveryMode,
 ) -> Vec<PathBuf> {
-    let mut candidates = match mode {
-        SkillDiscoveryMode::Compatible => vec![
-            workspace.join(".agents").join("skills"),
-            workspace.join("skills"),
-            workspace.join(".opencode").join("skills"),
-            workspace.join(".claude").join("skills"),
-            workspace.join(".cursor").join("skills"),
-            workspace.join(".codewhale").join("skills"),
-        ],
-        SkillDiscoveryMode::CodeWhaleOnly => codewhale_workspace_skills_dir(workspace)
-            .into_iter()
-            .collect(),
-    };
+    let mut candidates = Vec::new();
+
+    // Walk up from `workspace` through all ancestor directories so
+    // monorepo roots and parent projects contribute skills to nested
+    // subdirectories.  Closest ancestor first for precedence.
+    let mut current = fs::canonicalize(workspace)
+        .ok()
+        .unwrap_or_else(|| workspace.to_path_buf());
+    loop {
+        match mode {
+            SkillDiscoveryMode::Compatible => {
+                candidates.push(current.join(".agents").join("skills"));
+                candidates.push(current.join("skills"));
+                candidates.push(current.join(".opencode").join("skills"));
+                candidates.push(current.join(".claude").join("skills"));
+                candidates.push(current.join(".cursor").join("skills"));
+                candidates.push(current.join(".codewhale").join("skills"));
+            }
+            SkillDiscoveryMode::CodeWhaleOnly => {
+                candidates.push(current.join(".codewhale").join("skills"));
+            }
+        }
+        // Stop at the filesystem root.
+        if !current.pop() {
+            break;
+        }
+    }
     if let Some(home) = home_dir {
         match mode {
             SkillDiscoveryMode::Compatible => {
