@@ -675,6 +675,13 @@ fn push_model_row(
     rows.push(ModelPickerRow { id, provider, hint });
 }
 
+/// Cross-field search (#4141): match a query against the provider name
+/// (provider key + display name), the display model name, and the wire model
+/// id, mirroring `ProviderDashboardRow::matches_query` so the two pickers behave
+/// consistently. `row.id` is both the model's display name and the id it is
+/// sent to the provider as, so matching it covers the display model name and
+/// the wire model id. The compact hint is only searched for the active
+/// provider / `auto` rows, preserving the existing cross-provider behavior.
 fn model_row_matches_query(
     row: &ModelPickerRow,
     query: &str,
@@ -685,7 +692,7 @@ fn model_row_matches_query(
         return true;
     }
     let provider_matches = row.provider.is_some_and(|provider| {
-        provider.as_str().contains(&query)
+        provider.as_str().to_ascii_lowercase().contains(&query)
             || provider
                 .display_name()
                 .to_ascii_lowercase()
@@ -1666,6 +1673,103 @@ mod tests {
             view.resolved_effort(),
             ReasoningEffort::Medium,
             "OpenAI Codex rows should normalize auto to medium"
+        );
+    }
+
+    /// A cross-provider row used by the #4141 cross-field search tests: an
+    /// active DeepSeek session browsing Z.ai's `z-ai/glm-5.2` route.
+    fn cross_provider_row() -> ModelPickerRow {
+        ModelPickerRow {
+            id: "z-ai/glm-5.2".to_string(),
+            provider: Some(ApiProvider::Zai),
+            hint: "switch route · reasoning".to_string(),
+        }
+    }
+
+    #[test]
+    fn model_row_query_matches_provider_name() {
+        let row = cross_provider_row();
+        // Provider key (`zai`) and human display name (`Zhipu AI / Z.ai`) both
+        // match, even though neither is a substring of the wire model id.
+        assert!(model_row_matches_query(&row, "zai", ApiProvider::Deepseek));
+        assert!(model_row_matches_query(
+            &row,
+            "zhipu",
+            ApiProvider::Deepseek
+        ));
+        // Case-insensitive, matching the provider picker.
+        assert!(model_row_matches_query(
+            &row,
+            "ZHIPU",
+            ApiProvider::Deepseek
+        ));
+    }
+
+    #[test]
+    fn model_row_query_matches_display_model_name() {
+        let row = cross_provider_row();
+        // `row.id` is what the picker renders as the model's display name.
+        assert!(model_row_matches_query(
+            &row,
+            "glm-5.2",
+            ApiProvider::Deepseek
+        ));
+        assert!(model_row_matches_query(&row, "GLM", ApiProvider::Deepseek));
+    }
+
+    #[test]
+    fn model_row_query_matches_wire_model_id() {
+        let row = cross_provider_row();
+        // The full wire id (as sent to the provider) is searchable too, mirroring
+        // the provider picker's route wire-model match (#4141).
+        assert!(model_row_matches_query(
+            &row,
+            "z-ai/glm-5.2",
+            ApiProvider::Deepseek
+        ));
+        assert!(model_row_matches_query(
+            &row,
+            "z-ai/",
+            ApiProvider::Deepseek
+        ));
+    }
+
+    #[test]
+    fn model_row_query_no_field_match_returns_false() {
+        let row = cross_provider_row();
+        // `openai` is in neither the provider name/key, the display model name,
+        // nor the wire id, and the hint is not searched for cross-provider rows,
+        // so the row must not match.
+        assert!(!model_row_matches_query(
+            &row,
+            "openai",
+            ApiProvider::Deepseek
+        ));
+    }
+
+    #[test]
+    fn picker_query_by_wire_id_surfaces_cross_provider_row_and_hides_others() {
+        let (mut app, config, _lock) = create_test_app();
+        app.api_provider = crate::config::ApiProvider::Deepseek;
+        app.model = "deepseek-v4-pro".to_string();
+        app.auto_model = false;
+
+        let mut view = ModelPickerView::new(&app, &config);
+        // A GLM model id belongs to Z.ai; searching it surfaces that route while
+        // a query that matches no provider/model/wire field yields no rows.
+        type_model_query(&mut view, "glm");
+        assert!(
+            view.visible_model_rows()
+                .iter()
+                .any(|row| row.provider == Some(crate::config::ApiProvider::Zai)),
+            "searching a model name must surface the provider that serves it"
+        );
+
+        view.update_query(String::new());
+        type_model_query(&mut view, "zzz-no-such-provider-or-model");
+        assert!(
+            view.visible_model_rows().is_empty(),
+            "a query matching no provider/model/wire field must return no rows"
         );
     }
 

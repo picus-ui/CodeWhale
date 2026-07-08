@@ -595,8 +595,12 @@ impl ProviderDashboardRow {
         }
     }
 
-    /// Cross-field search (#3830 P1): match a query against display name,
-    /// provider id, kind, base URL, and the compact hint fields.
+    /// Cross-field search (#3830 P1, #4141): match a query against the provider
+    /// name (display name, provider id, kind, provider key), the base URL, and
+    /// the default route's display model name and wire model id. Matching the
+    /// route means a model name or wire id surfaces the provider that serves it,
+    /// keeping this picker consistent with the model picker's cross-field search
+    /// (`model_row_matches_query`).
     fn matches_query(&self, query: &str) -> bool {
         let query = query.trim().to_ascii_lowercase();
         if query.is_empty() {
@@ -607,6 +611,16 @@ impl ProviderDashboardRow {
             || self.kind.to_ascii_lowercase().contains(&query)
             || self.base_url.to_ascii_lowercase().contains(&query)
             || self.provider.as_str().to_ascii_lowercase().contains(&query)
+            || self
+                .default_route
+                .logical_model
+                .to_ascii_lowercase()
+                .contains(&query)
+            || self
+                .default_route
+                .wire_model
+                .to_ascii_lowercase()
+                .contains(&query)
     }
 }
 
@@ -2677,6 +2691,35 @@ mod tests {
         assert_eq!(row.reasoning.selected_control.as_deref(), Some("max"));
         assert!(row.compact_hint().contains("reasoning:high/max"));
         assert!(row.compact_hint().contains("stream:structured"));
+    }
+
+    #[test]
+    fn provider_row_query_matches_default_route_model_and_wire_id() {
+        // #4141: cross-field search must also match the default route's display
+        // model name and wire model id, keeping this picker consistent with the
+        // model picker (`model_row_matches_query`). Z.ai's provider key,
+        // display name, kind, and base URL contain no "glm", so a "glm" match
+        // can only come from the route's model/wire fields.
+        let config = Config {
+            providers: Some(crate::config::ProvidersConfig {
+                zai: crate::config::ProviderConfig {
+                    api_key: Some("zai-key".to_string()),
+                    model: Some("GLM-5.2".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Config::default()
+        };
+        let row = ProviderDashboardRow::from_config(ApiProvider::Zai, ApiProvider::Zai, &config);
+        assert_eq!(row.default_route.wire_model, "GLM-5.2");
+
+        // Wire model id + display model name, case-insensitively.
+        assert!(row.matches_query("glm-5.2"));
+        assert!(row.matches_query("GLM"));
+        // Provider name still matches, and an unrelated token still does not.
+        assert!(row.matches_query("zhipu"));
+        assert!(!row.matches_query("anthropic"));
     }
 
     #[test]
