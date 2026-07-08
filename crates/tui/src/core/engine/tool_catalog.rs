@@ -125,6 +125,21 @@ fn cached_fallbacks() -> &'static [CachedFallback] {
     })
 }
 
+/// Membership index over [`DEFAULT_ACTIVE_NATIVE_TOOLS`], built once for the
+/// process lifetime. The array stays the source of truth for *ordered*
+/// iteration (see [`tool_catalog_consistency_issues`] and
+/// `engine::default_active_native_tool_names`); this set only accelerates the
+/// hot membership check in [`should_default_defer_tool`], which runs once per
+/// catalog tool on every catalog rebuild (i.e. per turn) — an O(n·m) linear
+/// scan over the array collapses to O(1) hashed lookups.
+static DEFAULT_ACTIVE_NATIVE_TOOLS_SET: std::sync::OnceLock<HashSet<&'static str>> =
+    std::sync::OnceLock::new();
+
+fn default_active_native_tools_set() -> &'static HashSet<&'static str> {
+    DEFAULT_ACTIVE_NATIVE_TOOLS_SET
+        .get_or_init(|| DEFAULT_ACTIVE_NATIVE_TOOLS.iter().copied().collect())
+}
+
 pub(super) fn should_default_defer_tool(name: &str, always_load: &HashSet<String>) -> bool {
     if always_load.contains(name) {
         return false;
@@ -134,9 +149,10 @@ pub(super) fn should_default_defer_tool(name: &str, always_load: &HashSet<String
         return false;
     }
 
-    !DEFAULT_ACTIVE_NATIVE_TOOLS
-        .iter()
-        .any(|core_tool| core_tool == &name)
+    // Membership-only test (no ordering dependency): the side set built from
+    // DEFAULT_ACTIVE_NATIVE_TOOLS returns identical hit/miss results as the
+    // former `.iter().any(...)` linear scan.
+    !default_active_native_tools_set().contains(name)
 }
 
 pub(super) fn apply_native_tool_deferral(catalog: &mut [Tool], always_load: &HashSet<String>) {

@@ -1587,6 +1587,41 @@ fn non_yolo_mode_retains_default_defer_policy() {
 }
 
 #[test]
+fn default_defer_lookup_matches_linear_scan_over_active_native_tools() {
+    // Parity guard for #4152: `should_default_defer_tool` now consults an O(1)
+    // side set built from DEFAULT_ACTIVE_NATIVE_TOOLS instead of a linear
+    // `.iter().any(...)` scan. Assert the set returns the SAME hit/miss as an
+    // explicit linear scan over the ordered array — every array member is a hit
+    // (not deferred); names outside the array miss (deferred by default).
+    let always_load = HashSet::new();
+    let active = default_active_native_tool_names();
+
+    for name in active {
+        // Reference linear scan == what the converted lookup must agree with.
+        let linear_hit = active.iter().any(|core| core == name);
+        assert!(linear_hit, "reference scan should find array member {name}");
+        assert!(
+            !should_default_defer_tool(name, &always_load),
+            "array member {name} must stay active (not deferred)"
+        );
+    }
+
+    for name in [
+        "git_blame",
+        "task_shell_start",
+        REQUEST_USER_INPUT_NAME,
+        "definitely_not_a_tool",
+    ] {
+        let linear_hit = active.iter().any(|core| *core == name);
+        assert!(!linear_hit, "non-member {name} should be absent from array");
+        assert!(
+            should_default_defer_tool(name, &always_load),
+            "non-member {name} must default to deferred"
+        );
+    }
+}
+
+#[test]
 fn model_tool_catalog_applies_native_and_mcp_deferral() {
     let always_load = HashSet::new();
     let catalog = build_model_tool_catalog(
