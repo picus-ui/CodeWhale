@@ -5552,12 +5552,14 @@ mod tests {
             spawn_depth: 1,
             name: id.to_string(),
             role: "explore".to_string(),
+            model: None,
             status: "running".to_string(),
             objective: None,
             git_branch: None,
             progress: None,
             steps_taken: 1,
             duration_ms: None,
+            expanded: false,
         };
         // Parent + child + a two-node parent cycle: the cycle has no root, so
         // only the orphan sweep reaches it. Every row must still come out

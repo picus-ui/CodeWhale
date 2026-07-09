@@ -133,6 +133,20 @@ impl FileTreeState {
         }
     }
 
+    /// Drain any completed background walks (initial build or expands).
+    /// Returns `true` when new results were applied so the event loop can
+    /// schedule a repaint — without this, a walk finishing while the loop
+    /// is idle would leave the expanded directory looking empty until the
+    /// next unrelated input event (#3900).
+    pub fn poll_background(&mut self) -> bool {
+        let was_loading = self.is_loading;
+        self.poll_loading();
+        let finished_loading = was_loading && !self.is_loading;
+        let pending_before = self.pending_expands.len();
+        self.poll_pending_expands();
+        finished_loading || self.pending_expands.len() != pending_before
+    }
+
     /// Poll for background expand-walk results and splice them in.
     /// Call from the render loop, after [`Self::poll_loading`] (#3900).
     pub fn poll_pending_expands(&mut self) {
@@ -755,5 +769,42 @@ mod tests {
             entry_names(&state)
         );
         assert!(state.pending_expands.is_empty());
+    }
+
+    #[test]
+    fn poll_background_reports_applied_expand_results() {
+        let ws = fixture_workspace();
+        let mut state = FileTreeState::new(ws.path());
+        let src_norm = normalize_path(&ws.path().join("src"));
+        let src_idx = index_of(&state, "src");
+
+        state.expanded_dirs.insert(src_norm.clone());
+        state.entries[src_idx].expanded = true;
+        let children = build_file_tree_inner(
+            ws.path(),
+            &state.expanded_dirs,
+            Some(&ws.path().join("src")),
+        );
+        state.pending_expands.insert(
+            src_norm.clone(),
+            PendingExpand {
+                seq: 1,
+                cell: Arc::new(Mutex::new(Some(children))),
+            },
+        );
+
+        assert!(
+            state.poll_background(),
+            "a drained expand result must request a repaint"
+        );
+        assert!(state.entries.iter().any(|e| e.name == "main.rs"));
+        assert!(
+            state.pending_expands.is_empty(),
+            "applied expand must clear pending state"
+        );
+        assert!(
+            !state.poll_background(),
+            "idle poll must not request a second repaint"
+        );
     }
 }
