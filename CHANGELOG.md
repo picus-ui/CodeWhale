@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rebalance the bundled Constitution after the v0.8.67 prompt ablation: keep
+  the procedural policy tail in mode-specific layers, while restoring concise
+  behavioral guidance for momentum, causal investigation, constraint-first
+  decisions, mechanism-backed guarantees, and clean continuity.
 - Wire live catalog cache into provider/model pickers without dropping stale or
   prior rows after TTL expiry / refresh failure (#4139). Remove the dead
   `OFFERING_SEEDS` hand table so the bundled Models.dev catalog is the sole

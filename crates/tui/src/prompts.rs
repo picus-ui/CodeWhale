@@ -1625,7 +1625,12 @@ mod tests {
             "### Ground truth",
             "### Verify before you claim",
             "### Do what's asked",
+            "### Keep momentum",
+            "### Think in causes",
+            "### Honor constraints before preferences",
             "### Restraint",
+            "### Put guarantees in mechanism",
+            "### Leave continuity",
             "### Whose word wins",
         ] {
             assert!(
@@ -1633,6 +1638,28 @@ mod tests {
                 "BASE_PROMPT missing Constitutional phrase {phrase:?}"
             );
         }
+    }
+
+    #[test]
+    fn base_prompt_carries_balanced_behavioral_priors() {
+        for phrase in [
+            "action is the default",
+            "Autonomy has a boundary",
+            "Hold more than one plausible cause",
+            "Hard constraints are gates",
+            "mechanism carries it",
+            "so the next turn can continue",
+        ] {
+            assert!(
+                BASE_PROMPT.contains(phrase),
+                "BASE_PROMPT missing behavioral prior {phrase:?}"
+            );
+        }
+        assert!(
+            !BASE_PROMPT.contains("## STATUTES (Tier 2)")
+                && !BASE_PROMPT.contains("## REGULATIONS (Tier 3)"),
+            "the balanced Constitution must not restore the old procedural policy tail"
+        );
     }
 
     #[test]
@@ -2743,7 +2770,7 @@ mod tests {
     #[test]
     fn compose_prompt_includes_all_layers() {
         let prompt = compose_prompt(Personality::Calm);
-        // Base layer — 0.9.0 compact Constitution
+        // Base layer — balanced Constitution; procedural recipes stay out.
         assert!(prompt.contains("## CodeWhale"));
         assert!(prompt.contains("### Whose word wins"));
         assert!(!prompt.contains("## STATUTES (Tier 2)"));
@@ -2754,7 +2781,7 @@ mod tests {
         assert!(!prompt.contains("Approval Policy:"));
     }
 
-    /// `constitution.md` is the single hand-maintained source of the compact
+    /// `constitution.md` is the single hand-maintained source of the balanced
     /// constitutional core. This replaces the old 600-line policy tail: a
     /// hand-edit that drops a core section or reorders the skeleton fails the
     /// build instead of silently shipping a malformed prompt.
@@ -2768,7 +2795,12 @@ mod tests {
             "### Ground truth",
             "### Verify before you claim",
             "### Do what's asked",
+            "### Keep momentum",
+            "### Think in causes",
+            "### Honor constraints before preferences",
             "### Restraint",
+            "### Put guarantees in mechanism",
+            "### Leave continuity",
             "### Whose word wins",
         ] {
             let pos = md
