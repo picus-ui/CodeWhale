@@ -598,12 +598,22 @@ pub enum ViewEvent {
         provider_id: Option<String>,
     },
     /// Emitted by the `/provider` picker after the user types an API key
-    /// inline for a provider that lacked one. The handler should persist
-    /// the key via `save_api_key_for` and then perform the provider switch.
+    /// inline for a provider that lacked one. The handler validates the key
+    /// live; on success it reopens the guided flow at the model-pick stage
+    /// without persisting yet (#3875).
     ProviderPickerApiKeySubmitted {
         provider: crate::config::ApiProvider,
         provider_id: Option<String>,
         api_key: String,
+    },
+    /// Emitted by the `/provider` guided setup confirm stage after the user
+    /// accepted provider + model. The handler persists the key (and model)
+    /// via the comment-preserving config path, then performs the switch.
+    ProviderPickerSetupConfirmed {
+        provider: crate::config::ApiProvider,
+        provider_id: Option<String>,
+        api_key: String,
+        model: String,
     },
     /// Emitted by the `/provider` picker after the custom provider form is
     /// completed. The handler persists a named OpenAI-compatible provider

@@ -10850,6 +10850,25 @@ async fn handle_view_events(
                 }
                 apply_provider_picker_api_key(app, engine_handle, config, provider, api_key).await;
             }
+            ViewEvent::ProviderPickerSetupConfirmed {
+                provider,
+                provider_id,
+                api_key,
+                model,
+            } => {
+                if let Some(provider_id) = provider_id {
+                    set_active_custom_provider_in_memory(config, &provider_id);
+                }
+                apply_provider_picker_setup_confirmed(
+                    app,
+                    engine_handle,
+                    config,
+                    provider,
+                    api_key,
+                    model,
+                )
+                .await;
+            }
             ViewEvent::ProviderPickerCustomProviderSubmitted {
                 provider_id,
                 base_url,
@@ -11410,9 +11429,8 @@ async fn apply_provider_picker_api_key_with_verifier(
     api_key: String,
     verifier: &dyn ProviderKeyVerifier,
 ) {
-    use crate::config::save_api_key_for;
-
-    // #3875: verify the key against the provider before persisting.
+    // #3875: verify the key against the provider before opening the rest of
+    // the guided flow. Nothing is persisted until the confirm stage.
     // Use the provider's configured base URL (or the default) for the
     // models-endpoint probe so custom endpoints are also verified.
     let base_url = config
@@ -11421,7 +11439,32 @@ async fn apply_provider_picker_api_key_with_verifier(
         .filter(|url| !url.trim().is_empty())
         .unwrap_or_else(|| provider.default_base_url());
     match verifier.verify(provider, &api_key, base_url).await {
-        Ok(()) => { /* key is valid, proceed to persist */ }
+        Ok(()) => {
+            // Key is valid — continue the guided flow at model pick without
+            // writing the secret yet.
+            let runtime_status = query_provider_runtime_status(engine_handle).await;
+            if let Some(picker) =
+                crate::tui::provider_picker::ProviderPickerView::new_for_model_pick_after_validation(
+                    app.api_provider,
+                    provider,
+                    config,
+                    runtime_status,
+                    api_key,
+                )
+            {
+                app.view_stack.push(picker);
+                app.status_message = Some(format!(
+                    "{} API key verified — pick a default model.",
+                    provider.as_str()
+                ));
+            } else {
+                app.status_message = Some(format!(
+                    "{} API key verified, but the guided setup could not be re-opened.",
+                    provider.as_str()
+                ));
+            }
+            app.needs_redraw = true;
+        }
         Err(reason) => {
             // Verification failed - keep the picker open at the key-entry
             // stage with the provider's actual error so the user can fix
@@ -11448,17 +11491,51 @@ async fn apply_provider_picker_api_key_with_verifier(
                 ));
             }
             app.needs_redraw = true;
-            return;
         }
     }
+}
 
+async fn apply_provider_picker_setup_confirmed(
+    app: &mut App,
+    engine_handle: &mut EngineHandle,
+    config: &mut Config,
+    provider: ApiProvider,
+    api_key: String,
+    model: String,
+) {
+    use crate::config::{save_api_key_for, save_provider_model_for};
+
+    let model = model.trim().to_string();
+    if model.is_empty() {
+        app.add_message(HistoryCell::System {
+            content: format!(
+                "Cannot finish {} setup: default model is empty.\nProvider unchanged.",
+                provider.as_str()
+            ),
+        });
+        return;
+    }
+
+    // Persist key first via the existing comment-preserving path, then pin the
+    // chosen default model on the same document when the provider uses a
+    // `[providers.<name>]` table.
     match save_api_key_for(provider, &api_key) {
         Ok(path) => {
-            app.status_message = Some(format!(
-                "Saved {} API key to {}",
-                provider.as_str(),
-                path.display()
-            ));
+            if let Err(err) = save_provider_model_for(provider, &model) {
+                app.add_message(HistoryCell::System {
+                    content: format!(
+                        "Saved {} API key to {}, but failed to pin model `{model}`: {err}",
+                        provider.as_str(),
+                        path.display()
+                    ),
+                });
+            } else {
+                app.status_message = Some(format!(
+                    "Saved {} API key and model to {}",
+                    provider.as_str(),
+                    path.display()
+                ));
+            }
             app.api_key_env_only = false;
         }
         Err(err) => {
@@ -11473,7 +11550,16 @@ async fn apply_provider_picker_api_key_with_verifier(
     }
 
     mirror_saved_api_key_in_config(config, provider, api_key);
-    switch_provider(app, engine_handle, config, provider, None).await;
+    mirror_saved_model_in_config(config, provider, model.clone());
+    switch_provider(app, engine_handle, config, provider, Some(model)).await;
+}
+
+fn mirror_saved_model_in_config(config: &mut Config, provider: ApiProvider, model: String) {
+    if matches!(provider, ApiProvider::Deepseek | ApiProvider::DeepseekCN) {
+        config.default_text_model = Some(model);
+        return;
+    }
+    config.provider_config_for_mut(provider).model = Some(model);
 }
 
 fn mirror_saved_api_key_in_config(config: &mut Config, provider: ApiProvider, api_key: String) {
@@ -12908,7 +12994,7 @@ mod provider_key_validation_tests {
     }
 
     #[tokio::test]
-    async fn provider_key_submit_persists_after_mocked_validation_success() {
+    async fn provider_key_submit_opens_model_pick_without_persisting_on_validation_success() {
         let config_env = ConfigPathEnvGuard::new();
         let mut app = create_test_app();
         let mut engine = mock_engine_handle();
@@ -12933,6 +13019,75 @@ mod provider_key_validation_tests {
                 "https://mock.openrouter.test/v1".to_string()
             )]
         );
+        // Validation success must not persist or switch yet (#3875 residual):
+        // the guided flow continues at model pick first.
+        assert_eq!(app.api_provider, ApiProvider::Deepseek);
+        assert_eq!(config.provider.as_deref(), None);
+        assert_eq!(
+            config
+                .providers
+                .as_ref()
+                .and_then(|providers| providers.openrouter.api_key.as_deref()),
+            None
+        );
+        let saved = std::fs::read_to_string(config_env.config_path()).unwrap_or_default();
+        assert!(!saved.contains("sk-verified"));
+        assert_eq!(app.view_stack.top_kind(), Some(ModalKind::ProviderPicker));
+        assert!(
+            app.status_message
+                .as_deref()
+                .is_some_and(|status| status.contains("API key verified")),
+            "status names verification success: {:?}",
+            app.status_message
+        );
+
+        let picker = app.view_stack.pop().expect("provider picker reopened");
+        let area = Rect::new(0, 0, 90, 16);
+        let mut buf = Buffer::empty(area);
+        picker.render(area, &mut buf);
+        let rendered = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("Default model") || rendered.contains("Pick a default model"),
+            "expected model-pick stage UI, got:\n{rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_setup_confirm_persists_provider_model_and_preserves_comments() {
+        let config_env = ConfigPathEnvGuard::new();
+        // Seed a commented config so the confirm path must preserve it.
+        std::fs::write(
+            config_env.config_path(),
+            r#"# keep-me-comment
+[providers.openrouter]
+# openrouter-table-comment
+base_url = "https://mock.openrouter.test/v1"
+"#,
+        )
+        .expect("seed config");
+
+        let mut app = create_test_app();
+        let mut engine = mock_engine_handle();
+        let mut config = openrouter_config("https://mock.openrouter.test/v1");
+        let model = "deepseek/deepseek-v4-pro".to_string();
+
+        apply_provider_picker_setup_confirmed(
+            &mut app,
+            &mut engine.handle,
+            &mut config,
+            ApiProvider::Openrouter,
+            "sk-confirmed".to_string(),
+            model.clone(),
+        )
+        .await;
+
         assert_eq!(app.api_provider, ApiProvider::Openrouter);
         assert_eq!(config.provider.as_deref(), Some("openrouter"));
         assert_eq!(
@@ -12940,11 +13095,27 @@ mod provider_key_validation_tests {
                 .providers
                 .as_ref()
                 .and_then(|providers| providers.openrouter.api_key.as_deref()),
-            Some("sk-verified")
+            Some("sk-confirmed")
+        );
+        assert_eq!(
+            config
+                .providers
+                .as_ref()
+                .and_then(|providers| providers.openrouter.model.as_deref()),
+            Some(model.as_str())
         );
         let saved = std::fs::read_to_string(config_env.config_path()).expect("saved config");
+        assert!(
+            saved.contains("# keep-me-comment"),
+            "root comment lost:\n{saved}"
+        );
+        assert!(
+            saved.contains("# openrouter-table-comment"),
+            "table comment lost:\n{saved}"
+        );
         assert!(saved.contains("[providers.openrouter]"));
-        assert!(saved.contains("api_key = \"sk-verified\""));
+        assert!(saved.contains("api_key = \"sk-confirmed\""));
+        assert!(saved.contains(&format!("model = \"{model}\"")));
     }
 
     #[tokio::test]

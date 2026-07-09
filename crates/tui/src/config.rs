@@ -6415,6 +6415,37 @@ pub fn save_api_key_for(provider: ApiProvider, api_key: &str) -> Result<PathBuf>
     Ok(config_path)
 }
 
+/// Persist a default model for `provider` via the comment-preserving config
+/// path used by guided provider setup (#3875). DeepSeek writes root
+/// `default_text_model`; other hosted providers write `[providers.<name>] model`.
+pub fn save_provider_model_for(provider: ApiProvider, model: &str) -> Result<PathBuf> {
+    let model = model.trim();
+    anyhow::ensure!(!model.is_empty(), "model cannot be empty");
+
+    let config_path = default_config_path()
+        .context("Failed to resolve config path: home directory not found.")?;
+    ensure_parent_dir(&config_path)?;
+
+    if matches!(provider, ApiProvider::Deepseek | ApiProvider::DeepseekCN) {
+        crate::config_persistence::mutate_config_document(&config_path, |doc| {
+            crate::config_persistence::set_document_value(doc, &["default_text_model"], model)
+        })
+        .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
+        return Ok(config_path);
+    }
+
+    let key_inside = provider_config_key(provider).context("provider model table")?;
+    crate::config_persistence::mutate_config_document(&config_path, |doc| {
+        crate::config_persistence::set_document_value(
+            doc,
+            &["providers", key_inside, "model"],
+            model,
+        )
+    })
+    .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
+    Ok(config_path)
+}
+
 pub fn save_provider_auth_mode_for(provider: ApiProvider, auth_mode: &str) -> Result<PathBuf> {
     let config_path = default_config_path()
         .context("Failed to resolve config path: home directory not found.")?;
