@@ -1888,7 +1888,7 @@ fn config_hint_for_key(key: &str) -> &'static str {
         "model" => "deepseek-v4-pro | deepseek-v4-flash | deepseek-*",
         "provider" => "deepseek | openrouter | xiaomi-mimo | fireworks | siliconflow | ...",
         "approval_mode" => "auto | suggest | never",
-        "allow_shell" => "true enables shell in Agent mode with approvals on the next turn",
+        "allow_shell" => "true enables shell in Act mode with approvals on the next turn",
         "auto_compact"
         | "calm_mode"
         | "low_motion"
@@ -2206,6 +2206,10 @@ impl ModalView for ConfigView {
                 Line::from(vec![Span::styled(
                     self.tr(MessageId::ConfigTitle),
                     Style::default().fg(palette::WHALE_ACCENT_PRIMARY).bold(),
+                )]),
+                Line::from(vec![Span::styled(
+                    self.tr(MessageId::ConfigSubtitle),
+                    Style::default().fg(palette::TEXT_MUTED),
                 )]),
                 Line::from(vec![
                     Span::styled("  Search: ", Style::default().fg(palette::TEXT_MUTED)),
