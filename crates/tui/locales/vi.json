@@ -440,8 +440,8 @@
     "SetupToolsMcpServersLabel": "Máy chủ MCP:",
     "SetupToolsMcpSkillsLabel": "Kỹ năng:",
     "SetupToolsMcpToolsLabel": "Thư mục công cụ:",
-    "SetupToolsMcpPluginsLabel": "Thư mục plugin:",
-    "SetupToolsMcpReviewHint": "Enter ghi thông tin Tools/MCP hiện tại mà không tạo thư mục hay kết nối tới máy chủ.",
+    "SetupToolsMcpPluginsLabel": "Plugin:",
+    "SetupToolsMcpReviewHint": "Enter ghi thông tin Tools/MCP hiện tại. R xem on-ramp an toàn (không tự chạy).",
     "SetupToolsMcpReviewed": "Đã ghi mức sẵn sàng Tools/MCP.",
     "SetupRemoteCloudsLabel": "Đích cloud:",
     "SetupRemoteBridgesLabel": "Cầu nối chat:",
@@ -733,5 +733,9 @@
     "OnboardWelcomeStepTips": "mẹo thiết lập",
     "OnboardWelcomeDefaults": "Các mặc định đi kèm đã hợp lệ; có thể chỉnh bất cứ lúc nào bằng /constitution.",
     "OnboardWelcomeEnter": "Nhấn Enter để tiếp tục.",
-    "OnboardWelcomeExit": "Ctrl+C để thoát bất cứ lúc nào."
+    "OnboardWelcomeExit": "Ctrl+C để thoát bất cứ lúc nào.",
+    "SetupToolsMcpHotbarLabel": "Nguồn Hotbar:",
+    "SetupToolsMcpNeedsActionSaved": "Tools/MCP vẫn cần xử lý; đã ghi vào báo cáo (không chặn lần chạy đầu).",
+    "SetupToolsMcpPreviewTitle": "On-ramp an toàn Tools / MCP",
+    "SetupToolsMcpOnRampText": "Tools, MCP, Skills & Plugins — On-ramp an toàn\n\n/setup chỉ đọc kho cục bộ. Không khởi động máy chủ MCP, không cài skill, không chạy plugin hay lệnh không tin cậy.\n\nKho hiện tại:\n- MCP: {mcp_result}\n- Skills: {skills_result}\n- Tools: {tools_result}\n- Plugins: {plugins_result}\n- Hotbar (adapter dùng chung): {hotbar_result}\n\nĐường dẫn:\n- MCP: {mcp_path}\n- Skills: {skills_path}\n- Plugins: {plugins_path}\n\nBootstrap an toàn (bạn tự chạy):\n- MCP: /mcp · codewhale mcp init · codewhale doctor\n- Skills: /skills · codewhale setup --skills\n- Plugins: /plugin · codewhale setup --plugins\n- Tools: codewhale setup --tools\n\nMọi thao tác có tác dụng phụ luôn cần xác nhận rõ ràng. Xem docs/MCP.md."
 }

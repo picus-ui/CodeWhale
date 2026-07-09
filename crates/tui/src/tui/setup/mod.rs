@@ -43,6 +43,7 @@ mod operate;
 mod persistence;
 mod provider;
 mod remote;
+mod tools_mcp;
 
 pub(crate) use fleet_draft::{draft_fleet_profile_with_model, workspace_fingerprint};
 pub(crate) use model_draft::draft_constitution_with_model;
@@ -214,7 +215,12 @@ struct SetupRuntimeFacts {
     tools_mcp_skills_result: String,
     tools_mcp_tools_result: String,
     tools_mcp_plugins_result: String,
+    tools_mcp_hotbar_result: String,
     tools_mcp_result: String,
+    tools_mcp_needs_action: bool,
+    tools_mcp_path_display: String,
+    tools_mcp_skills_path_display: String,
+    tools_mcp_plugins_path_display: String,
     remote_clouds_result: String,
     remote_bridges_result: String,
     remote_providers_result: String,
@@ -262,7 +268,12 @@ impl Default for SetupRuntimeFacts {
             tools_mcp_skills_result: "skills dir not loaded".to_string(),
             tools_mcp_tools_result: "tools dir not loaded".to_string(),
             tools_mcp_plugins_result: "plugins dir not loaded".to_string(),
+            tools_mcp_hotbar_result: "hotbar source metadata not loaded".to_string(),
             tools_mcp_result: "tools/MCP not loaded".to_string(),
+            tools_mcp_needs_action: false,
+            tools_mcp_path_display: String::new(),
+            tools_mcp_skills_path_display: String::new(),
+            tools_mcp_plugins_path_display: String::new(),
             remote_clouds_result: "remote cloud registry not loaded".to_string(),
             remote_bridges_result: "remote bridge registry not loaded".to_string(),
             remote_providers_result: "provider registry not loaded".to_string(),
@@ -380,48 +391,18 @@ impl SetupRuntimeFacts {
         );
         let codewhale_home = setup_codewhale_home_dir();
         let persistence = SetupPersistenceFacts::from_app_config(app, config, &codewhale_home);
-        let project_mcp_path = crate::mcp::workspace_mcp_config_path(&app.workspace);
-        let mcp_global = if app.mcp_config_path.exists() {
-            "global present"
-        } else {
-            "global missing"
-        };
-        let mcp_project = if project_mcp_path.exists() {
-            "project present"
-        } else {
-            "project missing"
-        };
-        let tools_mcp_servers_result = format!(
-            "{} MCP servers configured ({mcp_global} at {}; {mcp_project} at {})",
-            app.mcp_configured_count,
-            app.mcp_config_path.display(),
-            project_mcp_path.display()
-        );
-        let skills_count = setup_skill_count_for(&app.skills_dir);
-        let tools_dir = codewhale_home.join("tools");
-        let plugins_dir = codewhale_home.join("plugins");
-        let tools_count = setup_count_dir_entries(&tools_dir);
-        let plugins_count = setup_count_dir_entries(&plugins_dir);
-        let tools_mcp_skills_result =
-            format!("{skills_count} skills at {}", app.skills_dir.display());
-        let tools_mcp_tools_result = format!(
-            "{tools_count} entries at {}{}",
-            tools_dir.display(),
-            if tools_dir.exists() { "" } else { " (missing)" }
-        );
-        let tools_mcp_plugins_result = format!(
-            "{plugins_count} entries at {}{}",
-            plugins_dir.display(),
-            if plugins_dir.exists() {
-                ""
-            } else {
-                " (missing)"
-            }
-        );
-        let tools_mcp_result = format!(
-            "mcp_servers={}, skills={}, tools={}, plugins={}, mode=read_only_review",
-            app.mcp_configured_count, skills_count, tools_count, plugins_count
-        );
+        let tools_mcp =
+            tools_mcp::SetupToolsMcpFacts::from_app_config(app, config, &codewhale_home);
+        let tools_mcp_servers_result = tools_mcp.servers_result;
+        let tools_mcp_skills_result = tools_mcp.skills_result;
+        let tools_mcp_tools_result = tools_mcp.tools_result;
+        let tools_mcp_plugins_result = tools_mcp.plugins_result;
+        let tools_mcp_hotbar_result = tools_mcp.hotbar_result;
+        let tools_mcp_result = tools_mcp.result;
+        let tools_mcp_needs_action = tools_mcp.needs_action;
+        let tools_mcp_path_display = tools_mcp.mcp_path_display;
+        let tools_mcp_skills_path_display = tools_mcp.skills_path_display;
+        let tools_mcp_plugins_path_display = tools_mcp.plugins_path_display;
         let remote = SetupRemoteFacts::from_app(app);
         let constitution_autonomy = UserConstitution::load()
             .ok()
@@ -461,7 +442,12 @@ impl SetupRuntimeFacts {
             tools_mcp_skills_result,
             tools_mcp_tools_result,
             tools_mcp_plugins_result,
+            tools_mcp_hotbar_result,
             tools_mcp_result,
+            tools_mcp_needs_action,
+            tools_mcp_path_display,
+            tools_mcp_skills_path_display,
+            tools_mcp_plugins_path_display,
             remote_clouds_result: remote.clouds_result,
             remote_bridges_result: remote.bridges_result,
             remote_providers_result: remote.providers_result,
@@ -494,28 +480,6 @@ fn setup_codewhale_home_dir() -> std::path::PathBuf {
             |home| home.join(".codewhale"),
         )
     })
-}
-
-fn setup_count_dir_entries(dir: &Path) -> usize {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .filter(|entry| entry.file_name().to_string_lossy() != ".DS_Store")
-                .count()
-        })
-        .unwrap_or(0)
-}
-
-fn setup_skill_count_for(dir: &Path) -> usize {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .filter(|entry| entry.path().join("SKILL.md").is_file())
-                .count()
-        })
-        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1791,17 +1755,38 @@ impl SetupWizardView {
     }
 
     fn commit_tools_mcp_review(&mut self) -> ViewAction {
+        // Optional step: empty/off inventories settle as Optional; broken
+        // configured tools record NeedsAction without blocking first-run.
+        let status = if self.facts.tools_mcp_needs_action {
+            StepStatus::NeedsAction
+        } else if self.facts.tools_mcp_result.contains("overall=off") {
+            StepStatus::Optional
+        } else {
+            StepStatus::Verified
+        };
         let mut state = self.state.clone();
         state.set_step(
             SetupStep::ToolsMcp,
-            StepEntry::new(StepStatus::Verified, false, CONSTITUTION_CHECKPOINT_VERSION)
+            StepEntry::new(status, false, CONSTITUTION_CHECKPOINT_VERSION)
                 .with_result(self.facts.tools_mcp_result.clone()),
         );
         self.state = state.clone();
         self.move_next();
+        let message_id = if status == StepStatus::NeedsAction {
+            MessageId::SetupToolsMcpNeedsActionSaved
+        } else {
+            MessageId::SetupToolsMcpReviewed
+        };
         ViewAction::Emit(ViewEvent::SetupStateCommitRequested {
             state,
-            message: tr(self.locale, MessageId::SetupToolsMcpReviewed).to_string(),
+            message: tr(self.locale, message_id).to_string(),
+        })
+    }
+
+    fn preview_tools_mcp_on_ramp(&self) -> ViewAction {
+        ViewAction::Emit(ViewEvent::OpenTextPager {
+            title: tr(self.locale, MessageId::SetupToolsMcpPreviewTitle).to_string(),
+            content: tools_mcp_on_ramp_text(self.locale, &self.facts),
         })
     }
 
@@ -2201,6 +2186,9 @@ impl ModalView for SetupWizardView {
             }
             KeyCode::Char('s') => {
                 self.commit_selected_status(StepStatus::Skipped, MessageId::SetupStepSkipped, true)
+            }
+            KeyCode::Char('r') if self.selected_step() == SetupStep::ToolsMcp => {
+                self.preview_tools_mcp_on_ramp()
             }
             KeyCode::Char('r') if self.selected_step() == SetupStep::RemoteRuntime => {
                 self.preview_remote_runtime_on_ramp()
@@ -2750,7 +2738,14 @@ impl SetupWizardView {
                 MessageId::SetupToolsMcpPluginsLabel,
                 &self.facts.tools_mcp_plugins_result,
             ),
-            self.setup_review_hint_line(MessageId::SetupToolsMcpReviewHint, None),
+            self.detail_row(
+                MessageId::SetupToolsMcpHotbarLabel,
+                &self.facts.tools_mcp_hotbar_result,
+            ),
+            self.setup_review_hint_line(
+                MessageId::SetupToolsMcpReviewHint,
+                Some("Press R for safe on-ramps (no auto-run)."),
+            ),
         ]
     }
 
@@ -3114,6 +3109,29 @@ fn remote_runtime_on_ramp_text(locale: Locale, facts: &SetupRuntimeFacts) -> Str
         &facts.remote_mode_result,
         &facts.remote_command_provider,
     )
+}
+
+fn tools_mcp_on_ramp_text(locale: Locale, facts: &SetupRuntimeFacts) -> String {
+    let tools_facts = tools_mcp::SetupToolsMcpFacts {
+        servers_result: facts.tools_mcp_servers_result.clone(),
+        skills_result: facts.tools_mcp_skills_result.clone(),
+        tools_result: facts.tools_mcp_tools_result.clone(),
+        plugins_result: facts.tools_mcp_plugins_result.clone(),
+        hotbar_result: facts.tools_mcp_hotbar_result.clone(),
+        result: facts.tools_mcp_result.clone(),
+        overall_status: if facts.tools_mcp_needs_action {
+            tools_mcp::InventoryStatus::NeedsConfig
+        } else if facts.tools_mcp_result.contains("overall=off") {
+            tools_mcp::InventoryStatus::Off
+        } else {
+            tools_mcp::InventoryStatus::Healthy
+        },
+        needs_action: facts.tools_mcp_needs_action,
+        mcp_path_display: facts.tools_mcp_path_display.clone(),
+        skills_path_display: facts.tools_mcp_skills_path_display.clone(),
+        plugins_path_display: facts.tools_mcp_plugins_path_display.clone(),
+    };
+    tools_mcp::on_ramp_text(locale, &tools_facts)
 }
 
 #[cfg(test)]
@@ -5671,11 +5689,11 @@ mod tests {
     #[test]
     fn tools_mcp_detail_lines_show_read_only_inventory_facts() {
         let facts = SetupRuntimeFacts {
-            tools_mcp_servers_result: "2 MCP servers configured (global present at /tmp/mcp.json; project missing at /tmp/project/.codewhale/mcp.json)"
-                .to_string(),
-            tools_mcp_skills_result: "3 skills at /tmp/skills".to_string(),
-            tools_mcp_tools_result: "1 entries at /tmp/tools".to_string(),
-            tools_mcp_plugins_result: "0 entries at /tmp/plugins (missing)".to_string(),
+            tools_mcp_servers_result: "healthy — 2 configured (2 healthy, 0 needs_config, 0 off; global present at /tmp/mcp.json; project missing at /tmp/project/.codewhale/mcp.json); healthy: docs, search".to_string(),
+            tools_mcp_skills_result: "healthy — 3 discovered (hotbar skill sources), 3 on disk at /tmp/skills".to_string(),
+            tools_mcp_tools_result: "healthy — 1 entries, 0 script-plugin tools at /tmp/tools".to_string(),
+            tools_mcp_plugins_result: "off — nothing configured yet (missing at /tmp/plugins); optional".to_string(),
+            tools_mcp_hotbar_result: "healthy — shared adapters: mcp_actions=0, skill_actions=3, plugin_actions=0 (deferred), slash_actions=12".to_string(),
             ..SetupRuntimeFacts::default()
         };
         let view = SetupWizardView::new_at_with_facts(
@@ -5688,21 +5706,26 @@ mod tests {
         let text = lines_to_text(view.tools_mcp_detail_lines());
 
         assert!(text.contains("MCP servers:"));
-        assert!(text.contains("2 MCP servers configured"));
+        assert!(text.contains("healthy"));
         assert!(text.contains("/tmp/mcp.json"));
         assert!(text.contains("/tmp/project/.codewhale/mcp.json"));
         assert!(text.contains("Skills:"));
         assert!(text.contains("/tmp/skills"));
         assert!(text.contains("Tools dir:"));
-        assert!(text.contains("Plugins dir:"));
+        assert!(text.contains("Plugins:"));
+        assert!(text.contains("Hotbar sources:"));
+        assert!(text.contains("shared adapters"));
         assert!(text.contains("Enter records this setup snapshot."));
+        assert!(text.contains("Press R for safe on-ramps"));
     }
 
     #[test]
-    fn tools_mcp_review_records_optional_snapshot() {
+    fn tools_mcp_review_records_optional_snapshot_when_empty() {
         let facts = SetupRuntimeFacts {
-            tools_mcp_result: "mcp_servers=2, skills=3, tools=1, plugins=0, mode=read_only_review"
-                .to_string(),
+            tools_mcp_result:
+                "mcp=off, skills=off, tools=off, plugins=off, hotbar_sources=shared adapters: mcp_actions=0, overall=off, mode=read_only_safe_probe"
+                    .to_string(),
+            tools_mcp_needs_action: false,
             ..SetupRuntimeFacts::default()
         };
         let mut view = SetupWizardView::new_at_with_facts(
@@ -5718,7 +5741,7 @@ mod tests {
         else {
             panic!("expected setup-state commit event");
         };
-        assert_eq!(state.status(SetupStep::ToolsMcp), StepStatus::Verified);
+        assert_eq!(state.status(SetupStep::ToolsMcp), StepStatus::Optional);
         let entry = state
             .steps
             .get(&SetupStep::ToolsMcp)
@@ -5728,10 +5751,73 @@ mod tests {
             entry
                 .result
                 .as_deref()
-                .is_some_and(|result| result.contains("mode=read_only_review"))
+                .is_some_and(|result| result.contains("mode=read_only_safe_probe"))
         );
         assert!(message.contains("Tools/MCP readiness recorded"));
         assert_eq!(view.selected_step(), SetupStep::RemoteRuntime);
+    }
+
+    #[test]
+    fn tools_mcp_review_records_needs_action_for_broken_config() {
+        let facts = SetupRuntimeFacts {
+            tools_mcp_result:
+                "mcp=needs_config, skills=off, tools=off, plugins=off, overall=needs_config, mode=read_only_safe_probe"
+                    .to_string(),
+            tools_mcp_needs_action: true,
+            ..SetupRuntimeFacts::default()
+        };
+        let mut view = SetupWizardView::new_at_with_facts(
+            SetupState::default(),
+            Locale::En,
+            SetupStep::ToolsMcp,
+            facts,
+        );
+
+        let action = view.handle_key(key(KeyCode::Enter));
+        let ViewAction::Emit(ViewEvent::SetupStateCommitRequested { state, message }) = action
+        else {
+            panic!("expected setup-state commit event");
+        };
+        assert_eq!(state.status(SetupStep::ToolsMcp), StepStatus::NeedsAction);
+        assert!(
+            !state
+                .steps
+                .get(&SetupStep::ToolsMcp)
+                .expect("entry")
+                .required
+        );
+        assert!(message.contains("needs action") || message.contains("Tools/MCP"));
+        // Optional step still advances; first-run is not blocked.
+        assert_eq!(view.selected_step(), SetupStep::RemoteRuntime);
+    }
+
+    #[test]
+    fn tools_mcp_on_ramp_preview_is_safe() {
+        let facts = SetupRuntimeFacts {
+            tools_mcp_servers_result: "off — nothing configured".into(),
+            tools_mcp_skills_result: "off — missing".into(),
+            tools_mcp_tools_result: "off — missing".into(),
+            tools_mcp_plugins_result: "off — missing".into(),
+            tools_mcp_hotbar_result: "off — shared adapters".into(),
+            tools_mcp_path_display: "~/.codewhale/mcp.json".into(),
+            tools_mcp_skills_path_display: "~/.codewhale/skills".into(),
+            tools_mcp_plugins_path_display: "~/.codewhale/plugins".into(),
+            ..SetupRuntimeFacts::default()
+        };
+        let mut view = SetupWizardView::new_at_with_facts(
+            SetupState::default(),
+            Locale::En,
+            SetupStep::ToolsMcp,
+            facts,
+        );
+
+        let action = view.handle_key(key(KeyCode::Char('r')));
+        let ViewAction::Emit(ViewEvent::OpenTextPager { title, content }) = action else {
+            panic!("expected on-ramp pager, got {action:?}");
+        };
+        assert!(title.to_ascii_lowercase().contains("tool") || title.contains("MCP"));
+        assert!(content.contains("/mcp") || content.contains("mcp init"));
+        assert!(!content.contains("sk-"));
     }
 
     #[test]

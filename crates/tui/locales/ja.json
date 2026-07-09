@@ -440,8 +440,8 @@
     "SetupToolsMcpServersLabel": "MCP サーバー:",
     "SetupToolsMcpSkillsLabel": "スキル:",
     "SetupToolsMcpToolsLabel": "ツールディレクトリ:",
-    "SetupToolsMcpPluginsLabel": "プラグインディレクトリ:",
-    "SetupToolsMcpReviewHint": "Enter で現在の Tools/MCP の事実を記録します。ディレクトリ作成やサーバー接続は行いません。",
+    "SetupToolsMcpPluginsLabel": "プラグイン:",
+    "SetupToolsMcpReviewHint": "Enter で現在の Tools/MCP の事実を記録します。R で安全なオンランプ（自動実行なし）。",
     "SetupToolsMcpReviewed": "Tools/MCP の準備状態を記録しました。",
     "SetupRemoteCloudsLabel": "クラウドターゲット:",
     "SetupRemoteBridgesLabel": "チャットブリッジ:",
@@ -733,5 +733,9 @@
     "OnboardWelcomeStepTips": "セットアップのヒント",
     "OnboardWelcomeDefaults": "同梱のデフォルトは有効です。/constitution でいつでも変更できます。",
     "OnboardWelcomeEnter": "Enter で続行。",
-    "OnboardWelcomeExit": "いつでも Ctrl+C で終了できます。"
+    "OnboardWelcomeExit": "いつでも Ctrl+C で終了できます。",
+    "SetupToolsMcpHotbarLabel": "ホットバーソース:",
+    "SetupToolsMcpNeedsActionSaved": "Tools/MCP はまだ対応が必要です。セットアップ報告に記録しました（初回実行はブロックしません）。",
+    "SetupToolsMcpPreviewTitle": "Tools / MCP 安全なオンランプ",
+    "SetupToolsMcpOnRampText": "Tools / MCP / スキル / プラグイン — 安全なオンランプ\n\n/setup はローカル在庫を読むだけです。MCP サーバー起動・スキルインストール・プラグイン実行・未信頼コマンドの自動実行は行いません。\n\n現状:\n- MCP: {mcp_result}\n- スキル: {skills_result}\n- ツール: {tools_result}\n- プラグイン: {plugins_result}\n- ホットバー（共有アダプタ）: {hotbar_result}\n\nパス:\n- MCP: {mcp_path}\n- スキル: {skills_path}\n- プラグイン: {plugins_path}\n\n安全なブートストラップ（明示実行）:\n- MCP: /mcp · codewhale mcp init · codewhale doctor\n- スキル: /skills · codewhale setup --skills\n- プラグイン: /plugin · codewhale setup --plugins\n- ツール: codewhale setup --tools\n\n副作用のある操作は常に確認が必要です。詳細は docs/MCP.md を参照してください。"
 }

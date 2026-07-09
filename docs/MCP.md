@@ -12,6 +12,30 @@ Server mode note:
 - The `codewhale` dispatcher exposes `codewhale mcp-server` as an equivalent stdio
   entrypoint used by the split CLI.
 
+## Setup wizard vs manual MCP setup (#3407)
+
+The constitution-first `/setup` wizard includes an optional **Tools and MCP**
+step. That step is discovery/readiness only:
+
+| Wizard can do | Still requires manual / explicit action |
+| --- | --- |
+| Show configured servers as `healthy` / `needs_config` / `off` | Start or connect MCP servers |
+| Report config path presence (global + project) | Write or edit `mcp.json` contents |
+| Safe static health probe (missing command/url, broken absolute path, missing bearer env) | `codewhale mcp validate`, live connect, OAuth login |
+| Point at safe on-ramps (`/mcp`, `codewhale mcp init`, `codewhale doctor`) | Install community skills, trust skills, enable plugins |
+| Share Hotbar source counts from the same skill/MCP adapters (#3399) | Bind Hotbar slots (Hotbar step / `H`) |
+| Record optional/`needs_action` setup_state without blocking first-run | Anything that spawns processes or installs packages |
+
+Empty inventory is **not** an error: first-run users see “nothing configured
+yet, that’s fine.” Failing or incomplete configured servers surface as
+`needs_config` with an actionable hint and never block setup completion.
+Enumeration never executes MCP/plugin commands beyond the static probe.
+Summaries redact commands, args, env, headers, and tokens.
+
+`codewhale doctor` reports MCP/skills/tools/plugins health with the same
+optional-surface intent (paths, counts, static checks) so wizard and doctor
+stay consistent.
+
 ## Bootstrap MCP Config
 
 Create a starter MCP config at your resolved MCP path:

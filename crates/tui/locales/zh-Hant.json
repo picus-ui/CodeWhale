@@ -359,8 +359,8 @@
     "SetupToolsMcpServersLabel": "MCP 伺服器：",
     "SetupToolsMcpSkillsLabel": "技能：",
     "SetupToolsMcpToolsLabel": "工具目錄：",
-    "SetupToolsMcpPluginsLabel": "外掛目錄：",
-    "SetupToolsMcpReviewHint": "按 Enter 記錄目前工具/MCP 事實，不建立目錄，也不連線到伺服器。",
+    "SetupToolsMcpPluginsLabel": "外掛：",
+    "SetupToolsMcpReviewHint": "按 Enter 記錄目前工具/MCP 事實。按 R 查看安全引導（不會自動執行）。",
     "SetupToolsMcpReviewed": "工具/MCP 就緒狀態已記錄。",
     "NotificationTurnComplete": "本輪已完成",
     "NotificationSubagentComplete": "子代理已完成",
@@ -444,5 +444,9 @@
     "OnboardWelcomeStepTips": "設定提示",
     "OnboardWelcomeDefaults": "內建預設規則已有效；可隨時用 /constitution 修改。",
     "OnboardWelcomeEnter": "按 Enter 繼續。",
-    "OnboardWelcomeExit": "任何時候按 Ctrl+C 結束。"
+    "OnboardWelcomeExit": "任何時候按 Ctrl+C 結束。",
+    "SetupToolsMcpHotbarLabel": "快捷列來源：",
+    "SetupToolsMcpNeedsActionSaved": "工具/MCP 仍需處理；已記錄到設定報告（不阻塞首次執行）。",
+    "SetupToolsMcpPreviewTitle": "工具 / MCP 安全引導",
+    "SetupToolsMcpOnRampText": "工具、MCP、技能與外掛 — 安全引導\n\n/setup 只讀取本機清單。不會啟動 MCP 伺服器、安裝技能、執行外掛或自動執行不受信任的命令。\n\n目前清單：\n- MCP：{mcp_result}\n- 技能：{skills_result}\n- 工具目錄：{tools_result}\n- 外掛：{plugins_result}\n- 快捷列（共用轉接器）：{hotbar_result}\n\n路徑：\n- MCP：{mcp_path}\n- 技能：{skills_path}\n- 外掛：{plugins_path}\n\n安全引導（請自行在終端機或 TUI 執行）：\n- MCP：/mcp · codewhale mcp init · codewhale doctor\n- 技能：/skills · codewhale setup --skills\n- 外掛：/plugin · codewhale setup --plugins\n- 工具：codewhale setup --tools\n\n有副作用的操作一律需要明確確認。詳見 docs/MCP.md。"
 }

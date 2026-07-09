@@ -442,8 +442,8 @@
     "SetupToolsMcpServersLabel": "MCP servers:",
     "SetupToolsMcpSkillsLabel": "Skills:",
     "SetupToolsMcpToolsLabel": "Tools dir:",
-    "SetupToolsMcpPluginsLabel": "Plugins dir:",
-    "SetupToolsMcpReviewHint": "Enter records this setup snapshot.",
+    "SetupToolsMcpPluginsLabel": "Plugins:",
+    "SetupToolsMcpReviewHint": "Enter records this setup snapshot. Press R for safe on-ramps (no auto-run).",
     "SetupToolsMcpReviewed": "Tools/MCP readiness recorded.",
     "SetupRemoteCloudsLabel": "Cloud targets:",
     "SetupRemoteBridgesLabel": "Chat bridges:",
@@ -737,5 +737,9 @@
     "OnboardWelcomeStepTips": "setup tips",
     "OnboardWelcomeDefaults": "Bundled defaults are valid; amend anytime with /constitution.",
     "OnboardWelcomeEnter": "Press Enter to continue.",
-    "OnboardWelcomeExit": "Ctrl+C exits at any point."
+    "OnboardWelcomeExit": "Ctrl+C exits at any point.",
+    "SetupToolsMcpHotbarLabel": "Hotbar sources:",
+    "SetupToolsMcpNeedsActionSaved": "Tools/MCP still needs action; recorded for setup report (does not block first-run).",
+    "SetupToolsMcpPreviewTitle": "Tools / MCP safe on-ramps",
+    "SetupToolsMcpOnRampText": "Tools, MCP, Skills & Plugins — Safe On-Ramps\n\n/setup only reads local inventory. It never starts MCP servers, installs skills, runs plugins, or executes untrusted commands.\n\nCurrent inventory:\n- MCP: {mcp_result}\n- Skills: {skills_result}\n- Tools dir: {tools_result}\n- Plugins: {plugins_result}\n- Hotbar (shared adapters): {hotbar_result}\n\nPaths (redacted home):\n- MCP config: {mcp_path}\n- Skills: {skills_path}\n- Plugins: {plugins_path}\n\nSafe bootstrap (run yourself in a normal terminal or TUI command):\n- MCP: /mcp  ·  codewhale mcp init  ·  codewhale doctor\n- Skills: /skills  ·  codewhale setup --skills  ·  /skills install <spec>\n- Plugins: /plugin  ·  codewhale setup --plugins\n- Tools dir: codewhale setup --tools\n\nSide-effectful actions always require explicit confirmation. Plugin commands stay distinct from slash commands; the Hotbar plugin source remains deferred until approval gates land.\n\nSee docs/MCP.md and docs/skills/README.md for what still needs manual external setup."
 }

@@ -440,8 +440,8 @@
     "SetupToolsMcpServersLabel": "Servidores MCP:",
     "SetupToolsMcpSkillsLabel": "Skills:",
     "SetupToolsMcpToolsLabel": "Diretório de ferramentas:",
-    "SetupToolsMcpPluginsLabel": "Diretório de plugins:",
-    "SetupToolsMcpReviewHint": "Enter registra os fatos atuais de Tools/MCP sem criar diretórios nem conectar a servidores.",
+    "SetupToolsMcpPluginsLabel": "Plugins:",
+    "SetupToolsMcpReviewHint": "Enter registra os fatos atuais de Tools/MCP. R mostra on-ramps seguros (sem execução automática).",
     "SetupToolsMcpReviewed": "Prontidão de Tools/MCP registrada.",
     "SetupRemoteCloudsLabel": "Destinos cloud:",
     "SetupRemoteBridgesLabel": "Pontes de chat:",
@@ -733,5 +733,9 @@
     "OnboardWelcomeStepTips": "dicas de setup",
     "OnboardWelcomeDefaults": "Os padrões incluídos são válidos; ajuste a qualquer momento com /constitution.",
     "OnboardWelcomeEnter": "Pressione Enter para continuar.",
-    "OnboardWelcomeExit": "Ctrl+C sai a qualquer momento."
+    "OnboardWelcomeExit": "Ctrl+C sai a qualquer momento.",
+    "SetupToolsMcpHotbarLabel": "Fontes do Hotbar:",
+    "SetupToolsMcpNeedsActionSaved": "Tools/MCP ainda precisa de ação; registrado no relatório (não bloqueia o primeiro uso).",
+    "SetupToolsMcpPreviewTitle": "On-ramps seguros de Tools / MCP",
+    "SetupToolsMcpOnRampText": "Tools, MCP, Skills e Plugins — On-ramps seguros\n\n/setup só lê o inventário local. Não inicia servidores MCP, não instala skills, não executa plugins nem comandos não confiáveis.\n\nInventário atual:\n- MCP: {mcp_result}\n- Skills: {skills_result}\n- Tools: {tools_result}\n- Plugins: {plugins_result}\n- Hotbar (adaptadores compartilhados): {hotbar_result}\n\nCaminhos:\n- MCP: {mcp_path}\n- Skills: {skills_path}\n- Plugins: {plugins_path}\n\nBootstrap seguro (execute você mesmo):\n- MCP: /mcp · codewhale mcp init · codewhale doctor\n- Skills: /skills · codewhale setup --skills\n- Plugins: /plugin · codewhale setup --plugins\n- Tools: codewhale setup --tools\n\nAções com efeitos colaterais sempre exigem confirmação explícita. Veja docs/MCP.md."
 }

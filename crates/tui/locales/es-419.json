@@ -440,8 +440,8 @@
     "SetupToolsMcpServersLabel": "Servidores MCP:",
     "SetupToolsMcpSkillsLabel": "Skills:",
     "SetupToolsMcpToolsLabel": "Directorio de herramientas:",
-    "SetupToolsMcpPluginsLabel": "Directorio de plugins:",
-    "SetupToolsMcpReviewHint": "Enter registra los datos actuales de Tools/MCP sin crear directorios ni conectarse a servidores.",
+    "SetupToolsMcpPluginsLabel": "Plugins:",
+    "SetupToolsMcpReviewHint": "Enter registra los datos actuales de Tools/MCP. R muestra on-ramps seguros (sin autoejecución).",
     "SetupToolsMcpReviewed": "Preparación de Tools/MCP registrada.",
     "SetupRemoteCloudsLabel": "Destinos cloud:",
     "SetupRemoteBridgesLabel": "Puentes de chat:",
@@ -733,5 +733,9 @@
     "OnboardWelcomeStepTips": "consejos de setup",
     "OnboardWelcomeDefaults": "Los valores incluidos ya son válidos; puedes ajustarlos cuando quieras con /constitution.",
     "OnboardWelcomeEnter": "Presiona Enter para continuar.",
-    "OnboardWelcomeExit": "Ctrl+C sale en cualquier momento."
+    "OnboardWelcomeExit": "Ctrl+C sale en cualquier momento.",
+    "SetupToolsMcpHotbarLabel": "Fuentes de Hotbar:",
+    "SetupToolsMcpNeedsActionSaved": "Tools/MCP aún necesita acción; se registró en el informe (no bloquea el primer uso).",
+    "SetupToolsMcpPreviewTitle": "On-ramps seguros de Tools / MCP",
+    "SetupToolsMcpOnRampText": "Tools, MCP, Skills y Plugins — On-ramps seguros\n\n/setup solo lee el inventario local. No inicia servidores MCP, no instala skills, no ejecuta plugins ni comandos no confiables.\n\nInventario actual:\n- MCP: {mcp_result}\n- Skills: {skills_result}\n- Tools: {tools_result}\n- Plugins: {plugins_result}\n- Hotbar (adaptadores compartidos): {hotbar_result}\n\nRutas:\n- MCP: {mcp_path}\n- Skills: {skills_path}\n- Plugins: {plugins_path}\n\nBootstrap seguro (ejecútalo tú):\n- MCP: /mcp · codewhale mcp init · codewhale doctor\n- Skills: /skills · codewhale setup --skills\n- Plugins: /plugin · codewhale setup --plugins\n- Tools: codewhale setup --tools\n\nLas acciones con efectos secundarios siempre requieren confirmación explícita. Ver docs/MCP.md."
 }
